@@ -87,7 +87,12 @@ spt_insert_page (struct supplemental_page_table *spt UNUSED,
 		struct page *page UNUSED) {
 	int succ = false;
 	/* TODO: Fill this function. */
-	
+	struct hash_elem *e = hash_insert(&spt->spt_hash, &page->spt_hash_elem);
+
+	// hash_insert()는 삽입에 성공했을 시, NULL을 old에 담아서 return
+	if (e == NULL) {
+		succ = true;
+	}
 	return succ;
 }
 
