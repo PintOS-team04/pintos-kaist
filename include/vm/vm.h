@@ -1,9 +1,10 @@
 #ifndef VM_VM_H
 #define VM_VM_H
 #include <stdbool.h>
-#include <kernel/hash.h>
-#include <threads/vaddr.h>
+#include "kernel/hash.h"
+#include "threads/vaddr.h"
 #include "threads/palloc.h"
+#include "threads/mmu.h"
 
 enum vm_type {
 	/* page not initialized */

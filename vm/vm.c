@@ -4,6 +4,9 @@
 #include "vm/vm.h"
 #include "vm/inspect.h"
 
+unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
+bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
+
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
 void
@@ -177,7 +180,7 @@ vm_claim_page (void *va UNUSED) {
 	struct page *page = NULL;
 	/* TODO: Fill this function */
 	struct thread *curr = thread_current();
-	page = spt_find_page(curr->spt, va);
+	page = spt_find_page(&curr->spt, va);
 
 	return vm_do_claim_page (page);
 }
@@ -192,10 +195,9 @@ vm_do_claim_page (struct page *page) {
 	page->frame = frame;
 	uint64_t pte = pml4e_walk(thread_current()->pml4,page->va,0);
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
-    if (install_page(page, frame, is_writable(&pte)) == true) {
-		return true;
-	}
-	return false;
+    pml4_set_page(thread_current()->pml4, page->va, frame->kva, is_writable(thread_current()->pml4));
+
+   	return swap_in (page, frame->kva);
 }
 
 /* Initialize new supplemental page table */
@@ -221,15 +223,15 @@ supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 
 /* Returns a hash value for page p. */
 unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED) {
-  const struct page *p = hash_entry (p_, struct page, hash_elem);
+  const struct page *p = hash_entry (p_, struct page, spt_hash_elem);
   return hash_bytes (&p->va, sizeof p->va);
 }
 
 /* Returns true if page a precedes page b. */
 bool page_less (const struct hash_elem *a_,
            const struct hash_elem *b_, void *aux UNUSED) {
-  const struct page *a = hash_entry (a_, struct page, hash_elem);
-  const struct page *b = hash_entry (b_, struct page, hash_elem);
+  const struct page *a = hash_entry (a_, struct page, spt_hash_elem);
+  const struct page *b = hash_entry (b_, struct page, spt_hash_elem);
 
   return a->va < b->va;
 }
