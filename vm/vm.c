@@ -129,6 +129,12 @@ static struct frame *
 vm_get_frame (void) {
 	struct frame *frame = NULL;
 	/* TODO: Fill this function. */
+	frame = palloc_get_page(PAL_USER);
+
+	if (frame == NULL) {
+		PANIC("to do");
+	}
+	frame->page = NULL;
 
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
@@ -170,6 +176,8 @@ bool
 vm_claim_page (void *va UNUSED) {
 	struct page *page = NULL;
 	/* TODO: Fill this function */
+	struct thread *curr = thread_current();
+	page = spt_find_page(curr->spt, va);
 
 	return vm_do_claim_page (page);
 }
@@ -182,16 +190,18 @@ vm_do_claim_page (struct page *page) {
 	/* Set links */
 	frame->page = page;
 	page->frame = frame;
-
+	uint64_t pte = pml4e_walk(thread_current()->pml4,page->va,0);
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
-
-	return swap_in (page, frame->kva);
+    if (install_page(page, frame, is_writable(&pte)) == true) {
+		return true;
+	}
+	return false;
 }
 
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
-	if (hash_init(&spt->spt_hash, spt->spt_hash.hash, spt->spt_hash.less, spt->spt_hash.aux) == NULL) {
+	if (hash_init(&spt->spt_hash, page_hash, page_less, NULL) == NULL) {
 		return;
 	}
 }
@@ -207,4 +217,19 @@ void
 supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
+}
+
+/* Returns a hash value for page p. */
+unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED) {
+  const struct page *p = hash_entry (p_, struct page, hash_elem);
+  return hash_bytes (&p->va, sizeof p->va);
+}
+
+/* Returns true if page a precedes page b. */
+bool page_less (const struct hash_elem *a_,
+           const struct hash_elem *b_, void *aux UNUSED) {
+  const struct page *a = hash_entry (a_, struct page, hash_elem);
+  const struct page *b = hash_entry (b_, struct page, hash_elem);
+
+  return a->va < b->va;
 }
