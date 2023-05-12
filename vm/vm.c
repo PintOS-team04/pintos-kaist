@@ -65,8 +65,20 @@ struct page *
 spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
 	struct page *page = NULL;
 	/* TODO: Fill this function. */
+	struct hash_elem *e;
+	struct page page_search;
+	page_search.va = pg_round_down(va);		// 가장 가까운 페이지 경계로 주소를 내림하여 초기화
+	
+	// spt에서 페이지 검색
+	e = hash_find(&spt->spt_hash, &page_search.spt_hash_elem);
 
-	return page;
+	if (e != NULL) {
+		struct page *found_page = hash_entry(e, struct page, spt_hash_elem);
+		return found_page;
+	}
+	else {
+		return NULL;
+	}
 }
 
 /* Insert PAGE into spt with validation. */
@@ -75,7 +87,7 @@ spt_insert_page (struct supplemental_page_table *spt UNUSED,
 		struct page *page UNUSED) {
 	int succ = false;
 	/* TODO: Fill this function. */
-
+	
 	return succ;
 }
 
@@ -174,6 +186,9 @@ vm_do_claim_page (struct page *page) {
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
+	if (hash_init(&spt->spt_hash, spt->spt_hash.hash, spt->spt_hash.less, spt->spt_hash.aux) == NULL) {
+		return;
+	}
 }
 
 /* Copy supplemental page table from src to dst */
