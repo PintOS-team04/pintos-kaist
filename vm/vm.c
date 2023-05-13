@@ -4,6 +4,9 @@
 #include "vm/vm.h"
 #include "vm/inspect.h"
 
+struct list frame_table;
+struct lock frame_lock;
+
 unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
 bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
 
@@ -50,7 +53,7 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 	ASSERT (VM_TYPE(type) != VM_UNINIT)
 
 	struct supplemental_page_table *spt = &thread_current ()->spt;
-
+	upage = pg_round_down(upage);
 	/* Check wheter the upage is already occupied or not. */
 	if (spt_find_page (spt, upage) == NULL) {
 		/* TODO: Create the page, fetch the initialier according to the VM type,
@@ -130,17 +133,20 @@ vm_evict_frame (void) {
  * space.*/
 static struct frame *
 vm_get_frame (void) {
-	struct frame *frame = NULL;
+	struct frame *frame = (struct frame *)malloc(sizeof(struct frame));
 	/* TODO: Fill this function. */
-	frame = palloc_get_page(PAL_USER);		// physical memory의 user pool에서 physical frame 주소 할당
+	ASSERT (frame != NULL);
+	ASSERT (frame->page == NULL);
+
+	frame->kva = palloc_get_page(PAL_USER);		// physical memory의 user pool에서 physical frame 주소 할당
 
 	if (frame == NULL) {					// vm_evict_frame() 호출하여 기존 p_memory에 존재하는 frame과
 		PANIC("to do");						// 연결된 페이지 하나를 swap-out, 해당 frame 반환
 	}
-	frame->page = NULL;
+	list_push_back(&frame_table, &frame->frame_elem);
 
-	ASSERT (frame != NULL);
-	ASSERT (frame->page == NULL);
+	frame->page = NULL;
+	
 	return frame;
 }
 
