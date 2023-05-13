@@ -132,10 +132,10 @@ static struct frame *
 vm_get_frame (void) {
 	struct frame *frame = NULL;
 	/* TODO: Fill this function. */
-	frame = palloc_get_page(PAL_USER);
+	frame = palloc_get_page(PAL_USER);		// physical memory의 user pool에서 physical frame 주소 할당
 
-	if (frame == NULL) {
-		PANIC("to do");
+	if (frame == NULL) {					// vm_evict_frame() 호출하여 기존 p_memory에 존재하는 frame과
+		PANIC("to do");						// 연결된 페이지 하나를 swap-out, 해당 frame 반환
 	}
 	frame->page = NULL;
 
@@ -180,12 +180,13 @@ vm_claim_page (void *va UNUSED) {
 	struct page *page = NULL;
 	/* TODO: Fill this function */
 	struct thread *curr = thread_current();
-	page = spt_find_page(&curr->spt, va);
+	page = spt_find_page(&curr->spt, va);		// p_memory와 연결할 페이지를 spt를 통해서 찾음
 
 	return vm_do_claim_page (page);
 }
 
 /* Claim the PAGE and set up the mmu. */
+// frame과 파라미터 page를 연결
 static bool
 vm_do_claim_page (struct page *page) {
 	struct frame *frame = vm_get_frame ();
@@ -193,7 +194,7 @@ vm_do_claim_page (struct page *page) {
 	/* Set links */
 	frame->page = page;
 	page->frame = frame;
-	uint64_t pte = pml4e_walk(thread_current()->pml4,page->va,0);
+	uint64_t pte = pml4e_walk(thread_current()->pml4, page->va, 0);
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
     pml4_set_page(thread_current()->pml4, page->va, frame->kva, is_writable(thread_current()->pml4));
 
