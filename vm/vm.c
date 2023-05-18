@@ -169,6 +169,7 @@ static void
 vm_stack_growth (void *addr UNUSED) {
 	vm_alloc_page(VM_ANON | VM_MARKER_0, addr, true);
 	vm_claim_page(addr);
+	// vm_alloc_page_with_initializer (VM_ANON, pg_round_down(addr), 1, NULL, NULL);
 }
 
 /* Handle the fault on write_protected page */
@@ -181,20 +182,21 @@ bool
 vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED, bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
 	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
 	struct page *page = NULL;
-	struct thread *t = thread_current();
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
-	uintptr_t rsp_ = (user == true) ? f->rsp : t->stack_rsp;
 
-	if (not_present) {
+	if (not_present) {	
 		page = spt_find_page(spt, addr);
-		if (page == NULL) {
-			if (USER_STACK - USER_STACK_LIMIT <= rsp_ - 8 && rsp_ - 8 <= addr && addr <= USER_STACK) {
-				vm_stack_growth(addr);
+
+		if (page == NULL) {	
+			void *rsp_ = (void *)user ? f->rsp : thread_current()->stack_rsp;	// 어디에서 발생한 page fault인지 확인
+			// USER_STACK 내에서 발생했는지, rsp 아래의 8바이트 위치에서 발생했는지
+			if (USER_STACK > addr && addr >= USER_STACK - (1 << 20) && addr >= rsp_ - 8) {
+				vm_stack_growth(pg_round_down(addr));
 				return true;
 			}
 			return false;
-		}
+		}	
 		return vm_do_claim_page(page);
 	}
 	return false;
