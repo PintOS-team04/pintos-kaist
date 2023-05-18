@@ -34,6 +34,9 @@ int write (int fd, const void *buffer, unsigned size) ;
 void seek (int fd, unsigned position);
 unsigned tell (int fd);
 void close (int fd);
+/* project 3 */
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset);
+void munmap (void *addr);
 
 /* System call.
  *
@@ -113,6 +116,12 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_CLOSE:
 				close(f->R.rdi);
 				break; 
+		case SYS_MMAP:
+				mmap(f->R.rdi, f->R.rsi, f->R.rax, f->R.r10, f->R.r8);
+				break;
+		case SYS_MUNMAP:
+				munmap(f->R.rdi);
+				break;
 		default:
 			exit(-1);
 			break;
@@ -283,4 +292,33 @@ void check_address(void *addr){
 	if(addr== NULL || !is_user_vaddr(addr)){
 		exit(-1);
 	} 
+}
+
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
+	if (offset % PGSIZE != 0) {
+		return NULL;
+	}
+	// mmap 실패하는 경우 : addr null || aligned || 
+	if (addr == NULL || pg_round_down(addr) != addr || length <= 0 || is_kernel_vaddr(addr)) {
+		return NULL;
+	}
+
+	if (spt_find_page(&thread_current()->spt, addr)) {
+		return NULL;
+	}
+
+	if (fd == 0 || fd == 1) {
+		exit(-1);
+	}
+
+	struct file * find_file = search_file_to_fdt(fd);
+	if (find_file == NULL) {
+		return NULL;
+	}
+
+	return do_mmap(addr, length, writable, find_file, offset);
+}
+
+void munmap (void *addr) {
+
 }
