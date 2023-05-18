@@ -6,8 +6,7 @@
 #include "userprog/process.h"
 #include <string.h>
 
-// struct list frame_table;
-// struct lock frame_lock;
+#define USER_STACK_LIMIT (1 << 20)
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -168,6 +167,8 @@ vm_get_frame (void) {
 /* Growing the stack. */
 static void
 vm_stack_growth (void *addr UNUSED) {
+	vm_alloc_page(VM_ANON | VM_MARKER_0, addr, true);
+	vm_claim_page(addr);
 }
 
 /* Handle the fault on write_protected page */
@@ -180,11 +181,18 @@ bool
 vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED, bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
 	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
 	struct page *page = NULL;
+	struct thread *t = thread_current();
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
+	uintptr_t rsp_ = (user == true) ? f->rsp : t->stack_rsp;
+
 	if (not_present) {
 		page = spt_find_page(spt, addr);
 		if (page == NULL) {
+			if (USER_STACK - USER_STACK_LIMIT <= rsp_ - 8 && rsp_ - 8 <= addr && addr <= USER_STACK) {
+				vm_stack_growth(addr);
+				return true;
+			}
 			return false;
 		}
 		return vm_do_claim_page(page);

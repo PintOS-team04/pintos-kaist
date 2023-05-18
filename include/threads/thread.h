@@ -122,6 +122,7 @@ struct thread {
 	struct file **fdt;
 	struct file *running;
 
+	uintptr_t *stack_rsp;
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */

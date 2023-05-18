@@ -34,6 +34,7 @@ int write (int fd, const void *buffer, unsigned size) ;
 void seek (int fd, unsigned position);
 unsigned tell (int fd);
 void close (int fd);
+struct file *process_get_file(int fd);
 
 /* System call.
  *
@@ -48,6 +49,7 @@ void close (int fd);
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 struct lock filesys_lock;
+
 void
 syscall_init (void) {
 	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48  |
@@ -66,8 +68,9 @@ syscall_init (void) {
 void
 syscall_handler (struct intr_frame *f UNUSED) {
 	// TODO: Your implementation goes here.
-
 	uint64_t sys_number = f->R.rax;
+	struct thread *t = thread_current();
+	t->stack_rsp = f->rsp;
 	
     switch (sys_number)
     {
@@ -200,25 +203,65 @@ int filesize (int fd) {
 	return file_length(file);
 }
 
-
-int read (int fd, void *buffer, unsigned size) {
-	/* 파일에 동시 접근이 일어날 수 있으므로 Lock 사용 */
-/* 파일 디스크립터를 이용하여 파일 객체 검색 */
-/* 파일 디스크립터가 0일 경우 키보드에 입력을 버퍼에 저장 후
-버퍼의 저장한 크기를 리턴 (input_getc() 이용) */
-/* 파일 디스크립터가 0이 아닐 경우 파일의 데이터를 크기만큼 저
-장 후 읽은 바이트 수를 리턴  */ 
+int read(int fd, void *buffer, unsigned size)
+{
+	check_address(buffer);
+	struct page *page = spt_find_page(&thread_current()->spt, pg_round_down(buffer));
+	if (page != NULL && page->writable == 0)
+		exit(-1);
+	off_t read_byte = 0;
+	uint8_t *read_buffer = (char *)buffer;
 	lock_acquire(&filesys_lock);
-	if(fd == 0){
-		input_getc();
-		lock_release(&filesys_lock);
-		return size;
+	if (fd == 0)
+	{
+		char key;
+		for (read_byte = 0; read_byte < size; read_byte++)
+		{
+			key = input_getc();	  // 키보드에 한 문자 입력받기
+			*read_buffer++ = key; // read_buffer에 받은 문자 저장
+			if (key == '\n')
+			{
+				break;
+			}
+		}
 	}
-  	struct file *fileobj= search_file_to_fdt(fd);
-	size = file_read(fileobj,buffer,size);
-	lock_release(&filesys_lock);	
-	return size;
+	else if (fd == 1)
+	{
+		lock_release(&filesys_lock);
+		return -1;
+	}
+	else
+	{
+		struct file *read_file = process_get_file(fd);
+		if (read_file == NULL)
+		{
+			lock_release(&filesys_lock);
+			return -1;
+		}
+		read_byte = file_read(read_file, buffer, size);
+	}
+	lock_release(&filesys_lock);
+	return read_byte;
 }
+
+// int read (int fd, void *buffer, unsigned size) {
+// 	/* 파일에 동시 접근이 일어날 수 있으므로 Lock 사용 */
+// /* 파일 디스크립터를 이용하여 파일 객체 검색 */
+// /* 파일 디스크립터가 0일 경우 키보드에 입력을 버퍼에 저장 후
+// 버퍼의 저장한 크기를 리턴 (input_getc() 이용) */
+// /* 파일 디스크립터가 0이 아닐 경우 파일의 데이터를 크기만큼 저
+// 장 후 읽은 바이트 수를 리턴  */ 
+// 	lock_acquire(&filesys_lock);
+// 	if(fd == 0){
+// 		input_getc();
+// 		lock_release(&filesys_lock);
+// 		return size;
+// 	}
+//   	struct file *fileobj= search_file_to_fdt(fd);
+// 	size = file_read(fileobj,buffer,size);
+// 	lock_release(&filesys_lock);	
+// 	return size;
+// }
 
 int write (int fd, const void *buffer, unsigned size) {
 	/* 파일에 동시 접근이 일어날 수 있으므로 Lock 사용 */
@@ -281,4 +324,16 @@ void check_address(void *addr){
 	if(addr== NULL || !is_user_vaddr(addr)) {
 		exit(-1);
 	} 
+}
+
+// 파일 객체를 검색하는 함수
+struct file *process_get_file(int fd)
+{
+	struct thread *curr = thread_current();
+	struct file **fdt = curr->fdt;
+	/* 파일 디스크립터에 해당하는 파일 객체를 리턴 */
+	/* 없을 시 NULL 리턴 */
+	if (fd < 2 || fd >= FDCOUNT_LIMIT)
+		return NULL;
+	return fdt[fd];
 }
