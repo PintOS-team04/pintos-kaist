@@ -117,7 +117,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				close(f->R.rdi);
 				break; 
 		case SYS_MMAP:
-				mmap(f->R.rdi, f->R.rsi, f->R.rax, f->R.r10, f->R.r8);
+				f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rax, f->R.r10, f->R.r8);
 				break;
 		case SYS_MUNMAP:
 				munmap(f->R.rdi);
@@ -209,25 +209,64 @@ int filesize (int fd) {
 	return file_length(file);
 }
 
-
-int read (int fd, void *buffer, unsigned size) {
-	/* 파일에 동시 접근이 일어날 수 있으므로 Lock 사용 */
-/* 파일 디스크립터를 이용하여 파일 객체 검색 */
-/* 파일 디스크립터가 0일 경우 키보드에 입력을 버퍼에 저장 후
-버퍼의 저장한 크기를 리턴 (input_getc() 이용) */
-/* 파일 디스크립터가 0이 아닐 경우 파일의 데이터를 크기만큼 저
-장 후 읽은 바이트 수를 리턴  */ 
+int read(int fd, void *buffer, unsigned size)
+{
+	check_address(buffer);
+	struct page *page = spt_find_page(&thread_current()->spt, pg_round_down(buffer));
+	if (page != NULL && page->writable == 0)
+		exit(-1);
+	off_t read_byte = 0;
+	uint8_t *read_buffer = (char *)buffer;
 	lock_acquire(&filesys_lock);
-	if(fd == 0){
-		input_getc();
-		lock_release(&filesys_lock);
-		return size;
+	if (fd == 0)
+	{
+		char key;
+		for (read_byte = 0; read_byte < size; read_byte++)
+		{
+			key = input_getc();	  // 키보드에 한 문자 입력받기
+			*read_buffer++ = key; // read_buffer에 받은 문자 저장
+			if (key == '\n')
+			{
+				break;
+			}
+		}
 	}
-  	struct file *fileobj= search_file_to_fdt(fd);
-	size = file_read(fileobj,buffer,size);
-	lock_release(&filesys_lock);	
-	return size;
+	else if (fd == 1)
+	{
+		lock_release(&filesys_lock);
+		return -1;
+	}
+	else
+	{
+		struct file *read_file = search_file_to_fdt(fd);
+		if (read_file == NULL)
+		{
+			lock_release(&filesys_lock);
+			return -1;
+		}
+		read_byte = file_read(read_file, buffer, size);
+	}
+	lock_release(&filesys_lock);
+	return read_byte;
 }
+// int read (int fd, void *buffer, unsigned size) {
+// 	/* 파일에 동시 접근이 일어날 수 있으므로 Lock 사용 */
+// /* 파일 디스크립터를 이용하여 파일 객체 검색 */
+// /* 파일 디스크립터가 0일 경우 키보드에 입력을 버퍼에 저장 후
+// 버퍼의 저장한 크기를 리턴 (input_getc() 이용) */
+// /* 파일 디스크립터가 0이 아닐 경우 파일의 데이터를 크기만큼 저
+// 장 후 읽은 바이트 수를 리턴  */ 
+// 	lock_acquire(&filesys_lock);
+// 	if(fd == 0){
+// 		input_getc();
+// 		lock_release(&filesys_lock);
+// 		return size;
+// 	}
+//   	struct file *fileobj= search_file_to_fdt(fd);
+// 	size = file_read(fileobj,buffer,size);
+// 	lock_release(&filesys_lock);	
+// 	return size;
+// }
 
 int write (int fd, const void *buffer, unsigned size) {
 	/* 파일에 동시 접근이 일어날 수 있으므로 Lock 사용 */
@@ -320,5 +359,5 @@ void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
 }
 
 void munmap (void *addr) {
-
+	return do_munmap(addr);
 }

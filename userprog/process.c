@@ -46,10 +46,17 @@ struct thread *get_child_process(int pid){
 
 struct file *search_file_to_fdt (int fd){
 	struct thread *curr = thread_current();
-	if (fd < 0 || fd >= FDCOUNT_LIMIT) {
+	struct file **fdt = curr->fdt;
+	/* 파일 디스크립터에 해당하는 파일 객체를 리턴 */
+	/* 없을 시 NULL 리턴 */
+	if (fd < 2 || fd >= FDCOUNT_LIMIT)
 		return NULL;
-	}
-	return curr->fdt[fd];
+	return fdt[fd];
+	// struct thread *curr = thread_current();
+	// if (fd < 0 || fd >= FDCOUNT_LIMIT) {
+	// 	return NULL;
+	// }
+	// return curr->fdt[fd];
 }
 
 int add_file_to_fdt (struct file *file){

@@ -1,7 +1,7 @@
 /* file.c: Implementation of memory backed file object (mmaped object). */
 
 #include "vm/vm.h"
-
+/* project 3 file mapped */
 #include "userprog/process.h"
 
 static bool file_backed_swap_in (struct page *page, void *kva);
@@ -50,8 +50,7 @@ file_backed_destroy (struct page *page) {
 
 /* Do the mmap */
 void *
-do_mmap (void *addr, size_t length, int writable,
-		struct file *file, off_t offset) {
+do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offset) {
 	void * start_addr = addr; // 첫 시작 주소 저장, 후에 return에 사용하기 위함
 
 	size_t read_bytes = file_length(file) < length ? file_length(file) : length;
@@ -83,6 +82,25 @@ do_mmap (void *addr, size_t length, int writable,
 }
 
 /* Do the munmap */
-void
-do_munmap (void *addr) {
+void do_munmap (void *addr) {
+	// printf("%d\n", pml4_is_dirty(thread_current()->pml4, addr));
+	// dirty bit 0으로 설정
+	while(true) {
+		struct thread *curr = thread_current();
+		struct page *page = spt_find_page(&curr->spt, addr);
+
+		if (page == NULL) {
+			return NULL;
+		}
+
+		struct lazy_load_container *container = (struct container *) page->uninit.aux;
+
+		if (pml4_is_dirty(curr->pml4, page->va)) {
+			file_write_at(container->file, addr, container->read_bytes, container->ofs);
+			pml4_set_dirty(curr->pml4, page->va, 0);
+		}
+
+		pml4_clear_page(curr->pml4, page->va);
+		addr += PGSIZE;
+	}
 }
