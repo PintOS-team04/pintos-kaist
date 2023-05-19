@@ -66,16 +66,16 @@ syscall_init (void) {
 void
 syscall_handler (struct intr_frame *f UNUSED) {
 	// TODO: Your implementation goes here.
-
+	thread_current()->user_rsp = f->rsp; /* project 3 stack_growth */
 	uint64_t sys_number = f->R.rax;
 	
     switch (sys_number)
     {
 		case SYS_HALT:
-				halt(); //
+				halt();
 				break;
 		case SYS_EXIT:
-				exit(f->R.rdi); //
+				exit(f->R.rdi);
 				break;
 		case SYS_FORK:
 				f->R.rax = fork(f->R.rdi, f); //syscall만, process해야함
@@ -87,16 +87,16 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				f->R.rax = wait(f->R.rdi); //syscall만, process해야함
 				break;
 		case SYS_CREATE:
-				f->R.rax = create(f->R.rdi, f->R.rsi); //
+				f->R.rax = create(f->R.rdi, f->R.rsi);
 				break;
 		case SYS_REMOVE:
-				f->R.rax = remove(f->R.rdi); //
+				f->R.rax = remove(f->R.rdi);
 				break;
 		case SYS_OPEN:
-				f->R.rax = open(f->R.rdi); //
+				f->R.rax = open(f->R.rdi);
 				break;
 		case SYS_FILESIZE:
-				f->R.rax = filesize(f->R.rdi); //
+				f->R.rax = filesize(f->R.rdi);
 				break;
 		case SYS_READ:
 				f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
@@ -105,16 +105,16 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
 				break;
 		case SYS_SEEK:
-				seek(f->R.rdi, f->R.rsi); //
+				seek(f->R.rdi, f->R.rsi);
 				break;
 		case SYS_TELL:
-				f->R.rax = tell(f->R.rdi); //
+				f->R.rax = tell(f->R.rdi);
 				break;
 		case SYS_CLOSE:
-				close(f->R.rdi); //
+				close(f->R.rdi);
 				break; 
 		default:
-			exit(-1); ///////
+			exit(-1);
 			break;
 		}
 }
@@ -278,7 +278,9 @@ void close (int fd) {
 
 void check_address(void *addr){
 	struct thread *curr = thread_current();
-	if(addr== NULL || !is_user_vaddr(addr)|| pml4_get_page(curr->pml4, addr) == NULL){
+	// project 3 수정
+	// if(addr== NULL || !is_user_vaddr(addr)|| pml4_get_page(curr->pml4, addr) == NULL){
+	if(addr== NULL || !is_user_vaddr(addr)){
 		exit(-1);
 	} 
 }
