@@ -756,15 +756,15 @@ install_page (void *upage, void *kpage, bool writable) {
  * upper block. */
 // project 3 - anon page
 // aux로 넘겨줄 정보 값을 저장하는 구조체
-struct lazy_load_container {
-    struct file *file;
-    off_t ofs;
-    uint32_t read_bytes;
-    uint32_t zero_bytes;
-};
+// struct lazy_load_container {
+//     struct file *file;
+//     off_t ofs;
+//     uint32_t read_bytes;
+//     uint32_t zero_bytes;
+// };
 
 // 함수 다시 보기
-static bool
+bool
 lazy_load_segment (struct page *page, void *aux) {
 	/* TODO: Load the segment from the file */
 	/* TODO: This called when the first page fault occurs on address VA. */
