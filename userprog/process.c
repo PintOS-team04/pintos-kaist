@@ -46,10 +46,12 @@ struct thread *get_child_process(int pid){
 
 struct file *search_file_to_fdt (int fd){
 	struct thread *curr = thread_current();
-	if (fd < 0 || fd >= FDCOUNT_LIMIT) {
+	struct file **fdt = curr->fdt;
+	/* 파일 디스크립터에 해당하는 파일 객체를 리턴 */
+	/* 없을 시 NULL 리턴 */
+	if (fd < 2 || fd >= FDCOUNT_LIMIT)
 		return NULL;
-	}
-	return curr->fdt[fd];
+	return fdt[fd];
 }
 
 int add_file_to_fdt (struct file *file){
@@ -92,7 +94,6 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
-	/*----------추가 코드------------------------*/
 	char *save_ptr;
 	file_name =strtok_r(file_name," ",&save_ptr);
 
@@ -757,7 +758,7 @@ install_page (void *upage, void *kpage, bool writable) {
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
 
-static bool
+bool
 lazy_load_segment (struct page *page, void *aux) {
 	/* TODO: Load the segment from the file */
 	/* TODO: This called when the first page fault occurs on address VA. */

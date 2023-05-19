@@ -22,4 +22,5 @@ void process_activate (struct thread *next);
 struct file *search_file_to_fdt (int fd);
 int add_file_to_fdt (struct file *file);
 void process_close_file(int fd);
+bool lazy_load_segment (struct page *page, void *aux);
 #endif /* userprog/process.h */

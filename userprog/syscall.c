@@ -15,6 +15,7 @@
 #include "lib/kernel/stdio.h"
 #include "threads/synch.h"
 #include "userprog/process.h"
+#include "vm/file.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -34,6 +35,8 @@ int write (int fd, const void *buffer, unsigned size) ;
 void seek (int fd, unsigned position);
 unsigned tell (int fd);
 void close (int fd);
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset);
+void munmap (void *addr);
 struct file *process_get_file(int fd);
 
 /* System call.
@@ -75,10 +78,10 @@ syscall_handler (struct intr_frame *f UNUSED) {
     switch (sys_number)
     {
 		case SYS_HALT:
-				halt(); //
+				halt();
 				break;
 		case SYS_EXIT:
-				exit(f->R.rdi); //
+				exit(f->R.rdi);
 				break;
 		case SYS_FORK:
 				f->R.rax = fork(f->R.rdi, f); //syscall만, process해야함
@@ -90,16 +93,16 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				f->R.rax = wait(f->R.rdi); //syscall만, process해야함
 				break;
 		case SYS_CREATE:
-				f->R.rax = create(f->R.rdi, f->R.rsi); //
+				f->R.rax = create(f->R.rdi, f->R.rsi);
 				break;
 		case SYS_REMOVE:
-				f->R.rax = remove(f->R.rdi); //
+				f->R.rax = remove(f->R.rdi);
 				break;
 		case SYS_OPEN:
-				f->R.rax = open(f->R.rdi); //
+				f->R.rax = open(f->R.rdi);
 				break;
 		case SYS_FILESIZE:
-				f->R.rax = filesize(f->R.rdi); //
+				f->R.rax = filesize(f->R.rdi);
 				break;
 		case SYS_READ:
 				f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
@@ -108,20 +111,25 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
 				break;
 		case SYS_SEEK:
-				seek(f->R.rdi, f->R.rsi); //
+				seek(f->R.rdi, f->R.rsi);
 				break;
 		case SYS_TELL:
-				f->R.rax = tell(f->R.rdi); //
+				f->R.rax = tell(f->R.rdi);
 				break;
 		case SYS_CLOSE:
-				close(f->R.rdi); //
-				break; 
+				close(f->R.rdi);
+				break;
+		case SYS_MMAP:
+				f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+				break;
+		case SYS_MUNMAP:
+				munmap(f->R.rdi);
+				break;
 		default:
-			exit(-1); ///////
+			exit(-1);
 			break;
 		}
 }
-
 
 void halt(void) {
     power_off();
@@ -140,7 +148,6 @@ tid_t fork (const char *thread_name, struct intr_frame *f) {
 	return process_fork(thread_name, f);
 }
 
-
 int exec (const char *cmd_line) {
 	check_address(cmd_line);
 
@@ -158,7 +165,6 @@ int exec (const char *cmd_line) {
 	NOT_REACHED();
 	return 0;
 }
-
 
 int wait (tid_t pid) {
 	return process_wait(pid);
@@ -232,7 +238,7 @@ int read(int fd, void *buffer, unsigned size)
 	}
 	else
 	{
-		struct file *read_file = process_get_file(fd);
+		struct file *read_file = search_file_to_fdt(fd);
 		if (read_file == NULL)
 		{
 			lock_release(&filesys_lock);
@@ -287,6 +293,7 @@ int write (int fd, const void *buffer, unsigned size) {
 	lock_release(&filesys_lock);
 	return size;
 }
+
 // 열린 파일의 위치(offset)를 이동하는 syscall
 // position 0은 파일의 시작 위치
 void seek (int fd, unsigned position) {
@@ -318,22 +325,43 @@ void close (int fd) {
 	curr->fdt[fd] = 0; /* 파일 디스크립터 엔트리 초기화 */
 }
 
+// checking validation of its arguments and calling do_mmap()
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
+	struct file *file = search_file_to_fdt(fd);
+	
+	if (file == NULL)
+		return NULL;
+
+	// 파일 시작점 페이지 정렬(PGSIZE에 맞게)되어 있는 지 확인
+	if (offset % PGSIZE != 0)
+		return NULL;
+
+	// addr의 값이 유효한 주소인지 & 해당 주소의 시작점으로 정렬되는지 & 주소가 커널 영역에 해당하는지
+	if (pg_round_down(addr) != addr || is_kernel_vaddr(addr))
+		return NULL;
+	
+	// 현재 주소를 가지고 있는 페이지가 spt에 존재해야하므로, 유효한 페이지인지 확인
+	if (spt_find_page(&thread_current()->spt, addr))
+		return NULL;
+
+	// addr이 NULL이 아니고 파일 길이(length)가 0 이상인지 확인
+	if (addr == NULL || (long long)length <= 0)
+		return NULL;
+	
+	// fd 값이 표준 입력이거나 표준 출력인지 확인
+	if (fd == 0 || fd == 1)
+		exit(-1);
+	
+	return do_mmap(addr, length, writable, file, offset);
+}
+
+void munmap (void *addr) {
+	do_munmap(addr);
+}
 
 void check_address(void *addr){
 	struct thread *curr = thread_current();
 	if(addr== NULL || !is_user_vaddr(addr)) {
 		exit(-1);
 	} 
-}
-
-// 파일 객체를 검색하는 함수
-struct file *process_get_file(int fd)
-{
-	struct thread *curr = thread_current();
-	struct file **fdt = curr->fdt;
-	/* 파일 디스크립터에 해당하는 파일 객체를 리턴 */
-	/* 없을 시 NULL 리턴 */
-	if (fd < 2 || fd >= FDCOUNT_LIMIT)
-		return NULL;
-	return fdt[fd];
 }
