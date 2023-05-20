@@ -141,6 +141,7 @@ spt_insert_page (struct supplemental_page_table *spt UNUSED,
 
 void
 spt_remove_page (struct supplemental_page_table *spt, struct page *page) {
+	hash_delete(&spt->spt_hash, &page->hash_elem);
 	vm_dealloc_page (page);
 	return true;
 }
@@ -207,7 +208,14 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 	// page-fault가 어떤 타입인지 확인
 	// 1 va에 매핑되지 않은 경우
 	// 2 bogus 인경우
-	if (addr == NULL || is_kernel_vaddr(addr)) {
+	if (addr == NULL) {
+		return false;
+	}
+	if (is_kernel_vaddr(addr)) {
+		return false;
+	}
+	
+	if (!not_present) {
 		return false;
 	}
 
@@ -328,7 +336,7 @@ void
 supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
-	hash_clear(&spt->spt_hash, &hash_elem_destroy);
+	hash_clear(&spt->spt_hash, hash_elem_destroy);
 }
 
 /* Returns a hash value for page p. */
