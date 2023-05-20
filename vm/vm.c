@@ -118,6 +118,7 @@ spt_insert_page (struct supplemental_page_table *spt UNUSED, struct page *page U
 
 void
 spt_remove_page (struct supplemental_page_table *spt, struct page *page) {
+	hash_delete(&spt->pages, &page->spt_hash_elem);
 	vm_dealloc_page (page);
 	return true;
 }
@@ -244,44 +245,56 @@ supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
 }
 
 /* Copy supplemental page table from src to dst */
+// bool
+// supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED, struct supplemental_page_table *src UNUSED) {
+// 	struct hash_iterator i;
+// 	hash_first(&i, &src->pages);
+// 	while (hash_next(&i)) {
+// 		struct page *p = hash_entry(hash_cur(&i), struct page, spt_hash_elem);
+
+// 		if (VM_TYPE(p->operations->type) == VM_UNINIT) {
+// 			vm_alloc_page_with_initializer(p->uninit.type, p->va, p->writable, p->uninit.init, p->uninit.aux);
+// 			continue;
+// 		}
+// 		vm_alloc_page(p->operations->type, p->va, p->writable);
+// 		struct page *child_page = spt_find_page(dst, p->va);
+// 		vm_claim_page(p->va);
+
+// 		memcpy(child_page->frame->kva, p->frame->kva, (size_t)PGSIZE);
+// 	}
+// 	return true;
+// }
+
 bool
 supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED, struct supplemental_page_table *src UNUSED) {
-	struct hash_iterator i;
-	hash_first(&i, &src->pages);
-	while (hash_next(&i)) {
-		struct page *p = hash_entry(hash_cur(&i), struct page, spt_hash_elem);
+	struct hash_iterator spt_iterator, dst_iterator;
+	hash_first(&spt_iterator, &src->pages);
 
-		if (VM_TYPE(p->operations->type) == VM_UNINIT) {
-			vm_alloc_page_with_initializer(p->uninit.type, p->va, p->writable, p->uninit.init, p->uninit.aux);
+	while (hash_next(&spt_iterator)) {
+		struct page *src_page = hash_entry(hash_cur(&spt_iterator), struct page, spt_hash_elem);
+		if (VM_TYPE(src_page->operations->type) == VM_UNINIT) {
+			vm_alloc_page_with_initializer(src_page->uninit.type, src_page->va, src_page->writable, src_page->uninit.init, src_page->uninit.aux);
 			continue;
 		}
-		vm_alloc_page(p->operations->type, p->va, p->writable);
-		struct page *child_page = spt_find_page(dst, p->va);
-		vm_claim_page(p->va);
+		if (src_page->operations->type == VM_ANON) {
+			vm_alloc_page(src_page->operations->type, src_page->va, src_page->writable);
+			struct page *dst_page = spt_find_page(dst, src_page->va);
+			vm_claim_page(src_page->va);
+			memcpy(dst_page->frame->kva, src_page->frame->kva, (size_t)PGSIZE);
+		}
+		else if (src_page->operations->type == VM_FILE) {
+			struct segment *aux = (struct segment *)malloc(sizeof(struct segment));
+			aux->file = file_duplicate(src_page->file.file);
+			aux->offset = src_page->file.file_ofs;
+			aux->page_read_bytes = src_page->file.read_bytes;
+			
+			vm_alloc_page_with_initializer(src_page->operations->type, src_page->va, src_page->writable, NULL, aux);
 
-		memcpy(child_page->frame->kva, p->frame->kva, (size_t)PGSIZE);
-
-		// enum vm_type type = page_get_type(p);
-		// void *va = p->va;
-		// bool writable = p->writable;
-		// vm_initializer *init = p->uninit.init;
-		// void *aux = p->uninit.aux;
-
-		// if (p->operations->type == VM_UNINIT) {
-		// 	if (!vm_alloc_page_with_initializer(type, va, writable, init, aux)) {
-		// 		return false;
-		// 	}
-		// }
-		// else {
-		// 	if (!vm_alloc_page(type, va, writable)) {
-		// 		return false;
-		// 	}
-		// 	if (!vm_claim_page(va)) {
-		// 		return false;
-		// 	}
-		// 	struct page *child_page = spt_find_page(dst, va);
-		// 	memcpy(child_page->frame->kva, p->frame->kva, PGSIZE);
-		// }
+			struct page *dst_page = spt_find_page(dst, src_page->va);
+			file_backed_initializer(dst_page, VM_FILE, NULL);
+			pml4_set_page(thread_current()->pml4, dst_page->va, src_page->frame->kva, src_page->writable);
+			dst_page->frame = src_page->frame;
+		}
 	}
 	return true;
 }

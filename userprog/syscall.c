@@ -172,6 +172,10 @@ int wait (tid_t pid) {
 
 bool create(const char *file, unsigned initial_size) {
 	check_address(file);
+	lock_acquire(&filesys_lock);
+	bool success = filesys_create(file, initial_size);
+	lock_release(&filesys_lock);
+	return success;
 	return filesys_create(file, initial_size);
 }
 
@@ -183,11 +187,15 @@ bool remove(const char *file) {
 int
 open (const char *file) {
 	check_address(file);
+	lock_acquire(&filesys_lock);
+
 	struct file *open_file = filesys_open(file);
 	
 	if (open_file == NULL) {
+		lock_release(&filesys_lock);
 		return -1;
 	} 
+
 	// 현재 프로세스의 fdt에 파일을 넣는 구문
 	int fd = add_file_to_fdt(open_file);
 	
@@ -195,6 +203,7 @@ open (const char *file) {
 	if (fd == -1) {
 		file_close(open_file);
 	}
+	lock_release(&filesys_lock);
 	return fd;
 }
 
@@ -209,45 +218,95 @@ int filesize (int fd) {
 	return file_length(file);
 }
 
+// int read(int fd, void *buffer, unsigned size)
+// {
+// 	check_address(buffer);
+// 	struct page *page = spt_find_page(&thread_current()->spt, pg_round_down(buffer));
+// 	if (page != NULL && page->writable == 0)
+// 		exit(-1);
+// 	off_t read_byte = 0;
+// 	uint8_t *read_buffer = (char *)buffer;
+// 	lock_acquire(&filesys_lock);
+// 	if (fd == 0)
+// 	{
+// 		char key;
+// 		for (read_byte = 0; read_byte < size; read_byte++)
+// 		{
+// 			key = input_getc();	  // 키보드에 한 문자 입력받기
+// 			*read_buffer++ = key; // read_buffer에 받은 문자 저장
+// 			if (key == '\n')
+// 			{
+// 				break;
+// 			}
+// 		}
+// 	}
+// 	else if (fd == 1)
+// 	{
+// 		lock_release(&filesys_lock);
+// 		return -1;
+// 	}
+// 	else
+// 	{
+// 		struct file *read_file = search_file_to_fdt(fd);
+// 		if (read_file == NULL)
+// 		{
+// 			lock_release(&filesys_lock);
+// 			return -1;
+// 		}
+// 		struct supplemental_page_table *spt = &thread_current()->spt;
+// 		struct page *p = spt_find_page(spt, buffer);
+// 		if (p != NULL && !p->writable) {
+// 			lock_release(&filesys_lock);
+// 			exit(-1);
+// 		}
+// 		read_byte = file_read(read_file, buffer, size);
+// 	}
+// 	lock_release(&filesys_lock);
+// 	return read_byte;
+// }
+
 int read(int fd, void *buffer, unsigned size)
 {
 	check_address(buffer);
-	struct page *page = spt_find_page(&thread_current()->spt, pg_round_down(buffer));
-	if (page != NULL && page->writable == 0)
-		exit(-1);
-	off_t read_byte = 0;
-	uint8_t *read_buffer = (char *)buffer;
+	char *ptr = (char *)buffer;
+	int bytes_read = 0;
 	lock_acquire(&filesys_lock);
-	if (fd == 0)
+	if (fd == STDIN_FILENO)
 	{
-		char key;
-		for (read_byte = 0; read_byte < size; read_byte++)
+		for (int i = 0; i < size; i++)
 		{
-			key = input_getc();	  // 키보드에 한 문자 입력받기
-			*read_buffer++ = key; // read_buffer에 받은 문자 저장
-			if (key == '\n')
-			{
-				break;
-			}
+			*ptr++ = input_getc();
+			bytes_read++;
 		}
-	}
-	else if (fd == 1)
-	{
 		lock_release(&filesys_lock);
-		return -1;
 	}
 	else
 	{
-		struct file *read_file = search_file_to_fdt(fd);
-		if (read_file == NULL)
+		if (fd < 2)
 		{
 			lock_release(&filesys_lock);
 			return -1;
 		}
-		read_byte = file_read(read_file, buffer, size);
+		struct file *file = search_file_to_fdt(fd);
+		if (file == NULL)
+		{
+			lock_release(&filesys_lock);
+			return -1;
+		}
+		/* buffer의 시작 주소를 기준으로 페이지를 찾고 해당 페이지가 writable인지 체크하기,
+		체크한 값에 대해 지금 write 할려는 시도가 가능하지 않다면 리턴*/
+
+		struct supplemental_page_table *spt = &thread_current()->spt;
+		struct page *p = spt_find_page(spt, buffer);
+		if (p != NULL && !p->writable)
+		{
+			lock_release(&filesys_lock);
+			exit(-1);
+		}
+		bytes_read = file_read(file, buffer, size);
+		lock_release(&filesys_lock);
 	}
-	lock_release(&filesys_lock);
-	return read_byte;
+	return bytes_read;
 }
 
 // int read (int fd, void *buffer, unsigned size) {
@@ -332,25 +391,32 @@ void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
 	if (file == NULL)
 		return NULL;
 
+	if (file_length(file) == 0)
+		return NULL;
+
+	// addr이 NULL이 아니고 파일 길이(length)가 0 이상인지 확인
+	if (!length || (long long)length < 0)
+		return NULL;
+	if (addr == NULL)
+		return NULL;
+
+	// fd 값이 표준 입력이거나 표준 출력인지 확인
+	if (fd < 2)
+		return NULL;
+
 	// 파일 시작점 페이지 정렬(PGSIZE에 맞게)되어 있는 지 확인
 	if (offset % PGSIZE != 0)
 		return NULL;
 
 	// addr의 값이 유효한 주소인지 & 해당 주소의 시작점으로 정렬되는지 & 주소가 커널 영역에 해당하는지
-	if (pg_round_down(addr) != addr || is_kernel_vaddr(addr))
+	if (is_kernel_vaddr(addr))
+		return NULL;
+	if (pg_round_down(addr) != addr)
 		return NULL;
 	
 	// 현재 주소를 가지고 있는 페이지가 spt에 존재해야하므로, 유효한 페이지인지 확인
 	if (spt_find_page(&thread_current()->spt, addr))
 		return NULL;
-
-	// addr이 NULL이 아니고 파일 길이(length)가 0 이상인지 확인
-	if (addr == NULL || (long long)length <= 0)
-		return NULL;
-	
-	// fd 값이 표준 입력이거나 표준 출력인지 확인
-	if (fd == 0 || fd == 1)
-		exit(-1);
 	
 	return do_mmap(addr, length, writable, file, offset);
 }

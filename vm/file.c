@@ -26,8 +26,12 @@ bool
 file_backed_initializer (struct page *page, enum vm_type type, void *kva) {
 	/* Set up the handler */
 	page->operations = &file_ops;
+	struct segment *arg = (struct segment *)page->uninit.aux;
 
 	struct file_page *file_page = &page->file;
+	file_page->file = arg->file;
+	file_page->file_ofs = arg->offset;
+	file_page->read_bytes = arg->page_read_bytes;
 }
 
 /* Swap in the page by read contents from the file. */
@@ -45,7 +49,15 @@ file_backed_swap_out (struct page *page) {
 /* Destory the file backed page. PAGE will be freed by the caller. */
 static void
 file_backed_destroy (struct page *page) {
-	struct file_page *file_page UNUSED = &page->file;
+	// struct file_page *file_page UNUSED = &page->file;
+	struct supplemental_page_table *spt = &thread_current()->spt;
+	struct file_page *arg = &page->file;
+	
+	if (pml4_is_dirty(thread_current()->pml4, page->va)) {
+		file_write_at(arg->file, page->va, arg->read_bytes, arg->file_ofs);
+		pml4_set_dirty(thread_current()->pml4, page->va, 0);
+	}
+	pml4_clear_page(thread_current()->pml4, page->va);
 }
 
 /* Do the mmap */
@@ -54,8 +66,12 @@ do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offse
 	struct file *get_file = file_reopen(file);
 	void *addr_origin = addr;
 
-	size_t read_bytes = file_length(file) < length ? file_length(file) : length;
-	size_t zero_bytes = PGSIZE - read_bytes % PGSIZE;
+	uint32_t read_bytes = file_length(get_file) < length ? file_length(get_file) : length;
+	uint32_t zero_bytes = PGSIZE - read_bytes % PGSIZE;
+
+	ASSERT((read_bytes + zero_bytes) % PGSIZE == 0);
+	ASSERT(pg_ofs(addr) == 0);
+	ASSERT(offset % PGSIZE == 0);
 
 	while (read_bytes > 0 || zero_bytes > 0) {
 		size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
@@ -70,6 +86,9 @@ do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offse
 			return NULL;
 		}
 
+		struct page *p = spt_find_page(&thread_current()->spt, addr);
+		p->page_cnt = read_bytes / PGSIZE + 1;
+
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
 		addr += PGSIZE;
@@ -78,8 +97,37 @@ do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offse
 	return addr_origin;
 }
 
+// /* Do the munmap */
+// void
+// do_munmap (void *addr) {
+// 	while (true) {
+// 		struct thread *curr = thread_current();
+// 		struct page *find_page = spt_find_page(&curr->spt, addr);
+
+// 		if (find_page == NULL) return NULL;
+
+// 		struct segment *container = (struct segment *)find_page->uninit.aux;
+// 		if (pml4_is_dirty(curr->pml4, find_page->va)) {
+// 			file_write_at(container->file, addr, container->page_read_bytes, container->offset);
+// 			pml4_set_dirty(curr->pml4, find_page->va, 0);
+// 		}
+
+// 		pml4_clear_page(curr->pml4, find_page->va);
+// 		addr += PGSIZE;
+// 	}
+// }
+
 /* Do the munmap */
 void
 do_munmap (void *addr) {
+	struct page *page = spt_find_page(&thread_current()->spt, addr);
+	off_t page_cnt = page->page_cnt;
 
+	for (int i = 0; i < page_cnt; i++) {
+		addr += PGSIZE;
+		if (page) {
+			spt_remove_page(&thread_current()->spt, page);
+		}
+		page = spt_find_page(&thread_current()->spt, addr);
+	}
 }

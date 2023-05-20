@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "userprog/syscall.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -28,6 +29,8 @@ static void initd (void *f_name);
 static void __do_fork (void *);
 void argument_stack(char **argv , int argc ,struct intr_frame *if_);
 struct thread *get_child_process(int pid);
+
+struct lock filesys_lock;
 
 // project 2 fork 관련 함수
 struct thread *get_child_process(int pid){
@@ -280,8 +283,6 @@ process_exec (void *f_name) {
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
-	//memset(argv,NULL,sizeof(argv)); // project 2 추가 내용, argv 초기화 방법 1
-
 	for(token = strtok_r(file_name," ", &save_ptr); token != NULL;){
         //printf ("'%s'\n", token);
 		argv[argc] = token;
@@ -289,18 +290,14 @@ process_exec (void *f_name) {
 		argc++;
     }
 
-	// file_name = argv[0];
 	/* We first kill the current context */
 	process_cleanup ();
 
 	/* And then load the binary */
-
-	/* *************************** */
-	// lock_acquire(&filesys_lock);
+	lock_acquire(&filesys_lock);
 	success = load (file_name, &_if);
-	// lock_release(&filesys_lock);
+	lock_release(&filesys_lock);
 
-	// hex_dump(_if.rsp, _if.rsp, USER_STACK - (uint64_t)_if.rsp, true);
 	/* If load failed, quit. */
 	if (!success){
 		palloc_free_page (file_name);
