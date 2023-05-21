@@ -113,7 +113,7 @@ initd (void *f_name) {
 #ifdef VM
 	supplemental_page_table_init (&thread_current ()->spt);
 #endif
-	process_init ();
+	// process_init ();
 
 	if (process_exec (f_name) < 0)
 		PANIC("Fail to launch initd\n");
@@ -168,8 +168,7 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
-	// newpage = palloc_get_page (PAL_USER); /////
-	newpage = palloc_get_page(PAL_USER | PAL_ZERO); ///////////////////
+	newpage = palloc_get_page(PAL_USER | PAL_ZERO);
 	if(newpage == NULL){
 		return false;
 	}

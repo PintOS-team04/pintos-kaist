@@ -120,7 +120,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				close(f->R.rdi);
 				break;
 		case SYS_MMAP:
-				f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+				f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rax, f->R.r10, f->R.r8);
 				break;
 		case SYS_MUNMAP:
 				munmap(f->R.rdi);
@@ -138,9 +138,9 @@ void halt(void) {
 // userprog/syscall.c
 void exit(int status) {
     struct thread *curr = thread_current();
-    curr->exit_status = status;                         // 종료시 상태를 확인, 정상종료면 state = 0
-    printf("%s: exit(%d)\n", curr->name, status); // 종료 메시지 출력
-    thread_exit();                                     // thread 종료
+    curr->exit_status = status;                         // 종료시 상태를 확인, 정상 종료면 state = 0
+    printf("%s: exit(%d)\n", curr->name, status); 		// 종료 메시지 출력
+    thread_exit();                                     	// thread 종료
 }
 
 tid_t fork (const char *thread_name, struct intr_frame *f) {
@@ -151,7 +151,7 @@ tid_t fork (const char *thread_name, struct intr_frame *f) {
 int exec (const char *cmd_line) {
 	check_address(cmd_line);
 
-	int size = strlen(cmd_line) + 1; // null 값 포함한 파일 사이즈
+	int size = strlen(cmd_line) + 1;		// null값 포함한 파일 사이즈
 	char *fn_copy = palloc_get_page(PAL_ZERO);
 	if ((fn_copy) == NULL) {
 		exit(-1);
@@ -199,7 +199,7 @@ open (const char *file) {
 	// 현재 프로세스의 fdt에 파일을 넣는 구문
 	int fd = add_file_to_fdt(open_file);
 	
-	//add 함수 실행했는데, 가득 차서 -1을 받은 경우
+	// add 함수 실행했는데, 가득 차서 -1을 받은 경우
 	if (fd == -1) {
 		file_close(open_file);
 	}
@@ -209,8 +209,8 @@ open (const char *file) {
 
 // 파일 크기 정보 > file : inode > inode_disk : off_t length
 int filesize (int fd) {
-	//file.c의 file_length() 활용
-	//fdt에 넣은 파일을 찾는 함수
+	// file.c의 file_length() 활용
+	// fdt에 넣은 파일을 찾는 함수
 	struct file *file = search_file_to_fdt(fd);
 	if (file == NULL) {
 		return -1;
@@ -218,58 +218,11 @@ int filesize (int fd) {
 	return file_length(file);
 }
 
-// int read(int fd, void *buffer, unsigned size)
-// {
-// 	check_address(buffer);
-// 	struct page *page = spt_find_page(&thread_current()->spt, pg_round_down(buffer));
-// 	if (page != NULL && page->writable == 0)
-// 		exit(-1);
-// 	off_t read_byte = 0;
-// 	uint8_t *read_buffer = (char *)buffer;
-// 	lock_acquire(&filesys_lock);
-// 	if (fd == 0)
-// 	{
-// 		char key;
-// 		for (read_byte = 0; read_byte < size; read_byte++)
-// 		{
-// 			key = input_getc();	  // 키보드에 한 문자 입력받기
-// 			*read_buffer++ = key; // read_buffer에 받은 문자 저장
-// 			if (key == '\n')
-// 			{
-// 				break;
-// 			}
-// 		}
-// 	}
-// 	else if (fd == 1)
-// 	{
-// 		lock_release(&filesys_lock);
-// 		return -1;
-// 	}
-// 	else
-// 	{
-// 		struct file *read_file = search_file_to_fdt(fd);
-// 		if (read_file == NULL)
-// 		{
-// 			lock_release(&filesys_lock);
-// 			return -1;
-// 		}
-// 		struct supplemental_page_table *spt = &thread_current()->spt;
-// 		struct page *p = spt_find_page(spt, buffer);
-// 		if (p != NULL && !p->writable) {
-// 			lock_release(&filesys_lock);
-// 			exit(-1);
-// 		}
-// 		read_byte = file_read(read_file, buffer, size);
-// 	}
-// 	lock_release(&filesys_lock);
-// 	return read_byte;
-// }
-
 int read(int fd, void *buffer, unsigned size)
 {
 	check_address(buffer);
 	char *ptr = (char *)buffer;
-	int bytes_read = 0;
+	off_t bytes_read = 0;
 	lock_acquire(&filesys_lock);
 	if (fd == STDIN_FILENO)
 	{
@@ -293,11 +246,9 @@ int read(int fd, void *buffer, unsigned size)
 			lock_release(&filesys_lock);
 			return -1;
 		}
-		/* buffer의 시작 주소를 기준으로 페이지를 찾고 해당 페이지가 writable인지 체크하기,
-		체크한 값에 대해 지금 write 할려는 시도가 가능하지 않다면 리턴*/
-
+		/* buffer의 시작 주소를 기준으로 페이지를 찾고 해당 페이지가 writable인지 체크하기, 체크한 값에 대해 지금 write 할려는 시도가 가능하지 않다면 리턴*/
 		struct supplemental_page_table *spt = &thread_current()->spt;
-		struct page *p = spt_find_page(spt, buffer);
+		struct page *p = spt_find_page(spt, pg_round_down(buffer));
 		if (p != NULL && !p->writable)
 		{
 			lock_release(&filesys_lock);
@@ -309,36 +260,15 @@ int read(int fd, void *buffer, unsigned size)
 	return bytes_read;
 }
 
-// int read (int fd, void *buffer, unsigned size) {
-// 	/* 파일에 동시 접근이 일어날 수 있으므로 Lock 사용 */
-// /* 파일 디스크립터를 이용하여 파일 객체 검색 */
-// /* 파일 디스크립터가 0일 경우 키보드에 입력을 버퍼에 저장 후
-// 버퍼의 저장한 크기를 리턴 (input_getc() 이용) */
-// /* 파일 디스크립터가 0이 아닐 경우 파일의 데이터를 크기만큼 저
-// 장 후 읽은 바이트 수를 리턴  */ 
-// 	lock_acquire(&filesys_lock);
-// 	if(fd == 0){
-// 		input_getc();
-// 		lock_release(&filesys_lock);
-// 		return size;
-// 	}
-//   	struct file *fileobj= search_file_to_fdt(fd);
-// 	size = file_read(fileobj,buffer,size);
-// 	lock_release(&filesys_lock);	
-// 	return size;
-// }
-
 int write (int fd, const void *buffer, unsigned size) {
 	/* 파일에 동시 접근이 일어날 수 있으므로 Lock 사용 */
-/* 파일 디스크립터를 이용하여 파일 객체 검색 */
-/* 파일 디스크립터가 1일 경우 버퍼에 저장된 값을 화면에 출력
-후 버퍼의 크기 리턴 (putbuf() 이용) */
-/* 파일 디스크립터가 1이 아닐 경우 버퍼에 저장된 데이터를 크기
-만큼 파일에 기록후 기록한 바이트 수를 리턴 */
+	/* 파일 디스크립터를 이용하여 파일 객체 검색 */
+	/* 파일 디스크립터가 1일 경우 버퍼에 저장된 값을 화면에 출력 후 버퍼의 크기 리턴 (putbuf() 이용) */
+	/* 파일 디스크립터가 1이 아닐 경우 버퍼에 저장된 데이터를 크기만큼 파일에 기록후 기록한 바이트 수를 리턴 */
 	lock_acquire(&filesys_lock);
 	if(fd == 1){
-		 putbuf(buffer, size);  //문자열을 화면에 출력해주는 함수
-		//putbuf(): 버퍼 안에 들어있는 값 중 사이즈 N만큼을 console로 출력
+		 putbuf(buffer, size);  // 문자열을 화면에 출력해주는 함수
+		// putbuf(): 버퍼 안에 들어있는 값 중 사이즈 N만큼을 console로 출력
 		lock_release(&filesys_lock);
 		return size;
 	}
@@ -357,20 +287,16 @@ int write (int fd, const void *buffer, unsigned size) {
 // position 0은 파일의 시작 위치
 void seek (int fd, unsigned position) {
 	struct file *file = search_file_to_fdt(fd);
-	// check_address(file); // 넣으면 TC Fail
 
-	// stdin = 0 / stdout = 1
 	if (fd <= 1) {
 		return;
 	}
-
 	file_seek(file, position);
 }
 
 // 열린 파일의 위치(offset)을 알려주는 syscall
 unsigned tell (int fd) {
 	struct file *file = search_file_to_fdt(fd);
-	// check_address(file); // 넣으면 TC Fail
 
 	if (fd <= 1) {
 		return;

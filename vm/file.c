@@ -81,9 +81,10 @@ do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offse
 		container->file = get_file;
 		container->offset = offset;
 		container->page_read_bytes = page_read_bytes;
+		container->page_zero_bytes = page_zero_bytes;
 
 		if (!vm_alloc_page_with_initializer(VM_FILE, addr, writable, lazy_load_segment, container)) {
-			return NULL;
+			return false;
 		}
 
 		struct page *p = spt_find_page(&thread_current()->spt, addr);
@@ -96,26 +97,6 @@ do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offse
 	}
 	return addr_origin;
 }
-
-// /* Do the munmap */
-// void
-// do_munmap (void *addr) {
-// 	while (true) {
-// 		struct thread *curr = thread_current();
-// 		struct page *find_page = spt_find_page(&curr->spt, addr);
-
-// 		if (find_page == NULL) return NULL;
-
-// 		struct segment *container = (struct segment *)find_page->uninit.aux;
-// 		if (pml4_is_dirty(curr->pml4, find_page->va)) {
-// 			file_write_at(container->file, addr, container->page_read_bytes, container->offset);
-// 			pml4_set_dirty(curr->pml4, find_page->va, 0);
-// 		}
-
-// 		pml4_clear_page(curr->pml4, find_page->va);
-// 		addr += PGSIZE;
-// 	}
-// }
 
 /* Do the munmap */
 void
