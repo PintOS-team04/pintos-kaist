@@ -401,10 +401,11 @@ process_exit (void) {
 
 	file_close(curr->running);
 
+	process_cleanup ();
 	sema_up(&curr->wait_sema);
 	sema_down(&curr->free_sema);
 
-	process_cleanup ();
+	// process_cleanup ();
 }
 
 /* Free the current process's resources. */

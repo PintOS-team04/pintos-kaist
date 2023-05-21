@@ -117,7 +117,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				close(f->R.rdi);
 				break; 
 		case SYS_MMAP:
-				f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rax, f->R.r10, f->R.r8);
+				f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
 				break;
 		case SYS_MUNMAP:
 				munmap(f->R.rdi);
@@ -338,7 +338,7 @@ void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
 		return NULL;
 	}
 	// mmap 실패하는 경우 : addr null || aligned || 
-	if (addr == NULL || pg_round_down(addr) != addr || length <= 0 || is_kernel_vaddr(addr)) {
+	if (addr == NULL || pg_round_down(addr) != addr ||length == 0 || KERN_BASE <= length || is_kernel_vaddr(addr)) {
 		return NULL;
 	}
 
@@ -359,5 +359,5 @@ void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
 }
 
 void munmap (void *addr) {
-	return do_munmap(addr);
+	do_munmap(addr);
 }
