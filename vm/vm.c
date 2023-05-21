@@ -20,8 +20,8 @@ vm_init (void) {
 	register_inspect_intr ();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
-	// list_init(&frame_table);
-	// list_init(&frame_lock);
+	list_init(&frame_table);
+	lock_init(&frame_lock);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -128,7 +128,17 @@ static struct frame *
 vm_get_victim (void) {
 	struct frame *victim = NULL;
 	 /* TODO: The policy for eviction is up to you. */
+	for (struct list_elem *e = list_begin(&frame_table); e != list_end(&frame_table); e = list_next(e)) {
+		victim = list_entry(e, struct frame, frame_elem);
 
+		if (victim->page == NULL)
+			return victim;
+
+		if (!pml4_is_accessed(thread_current()->pml4, victim->page->va))
+			return victim;
+		
+		pml4_set_accessed(thread_current()->pml4, victim->page->va, 0);
+	}
 	return victim;
 }
 
@@ -138,8 +148,8 @@ static struct frame *
 vm_evict_frame (void) {
 	struct frame *victim UNUSED = vm_get_victim ();
 	/* TODO: swap out the victim and return the evicted frame. */
-
-	return NULL;
+	swap_out(victim->page);
+	return victim;
 }
 
 /* palloc() and get frame. If there is no available page, evict the page
@@ -154,9 +164,15 @@ vm_get_frame (void) {
 	frame->kva = palloc_get_page(PAL_USER);		// physical memory의 user pool에서 physical frame 주소 할당
 
 	if (frame->kva == NULL) {					// vm_evict_frame() 호출하여 기존 p_memory에 존재하는 frame과
+		free(frame);
+		frame = vm_evict_frame();
+		frame->page = NULL;
+		return frame;
+
 		PANIC("to do");							// 연결된 페이지 하나를 swap-out, 해당 frame 반환
 	}
-	// list_push_back(&frame_table, &frame->frame_elem);
+
+	list_push_back(&frame_table, &frame->frame_elem);
 
 	frame->page = NULL;
 	
