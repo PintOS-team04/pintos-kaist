@@ -143,6 +143,7 @@ process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	struct thread *child_t = get_child_process(pid);
 	sema_down(&child_t->fork_sema);
 	if (child_t->exit_status == -1) {
+		sema_up(&child_t->free_sema); //////
 		return TID_ERROR;
 	}
 	return pid;

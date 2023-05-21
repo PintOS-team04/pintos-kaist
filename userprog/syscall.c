@@ -62,7 +62,7 @@ syscall_init (void) {
 	 * mode stack. Therefore, we masked the FLAG_FL. */
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
-	lock_init(&filesys_lock);
+	// lock_init(&filesys_lock);
 }
 
 /* The main system call interface */
@@ -152,9 +152,9 @@ int exec (const char *cmd_line) {
 
 	int size = strlen(cmd_line) + 1; // null 값 포함한 파일 사이즈
 	char *fn_copy = palloc_get_page(PAL_ZERO);
-	if ((fn_copy) == NULL) {
-		exit(-1);
-	}
+	// if ((fn_copy) == NULL) {
+	// 	exit(-1);
+	// }
 	strlcpy(fn_copy, cmd_line, size);
 
 	if (process_exec(fn_copy) == -1) {
@@ -162,7 +162,7 @@ int exec (const char *cmd_line) {
 	}
 
 	NOT_REACHED();
-	return 0;
+
 }
 
 

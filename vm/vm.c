@@ -316,7 +316,7 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 				return false;
 			}
 		}
-		else {
+		else if (parent_page->operations->type == VM_ANON) {
 			if (!vm_alloc_page(type, upage, writable)) {
 					return false;
 			}
@@ -326,6 +326,19 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 			struct page * child_page = spt_find_page(dst, upage);
 				// 부모 페이지의 물리 메모리 정보를 자식에게 복사
 			memcpy(child_page->frame->kva, parent_page->frame->kva, PGSIZE);
+			}
+		else {
+			struct lazy_load_container *container = (struct lazy_load_container*)malloc(sizeof(struct lazy_load_container));
+			container->file = file_duplicate(parent_page->file.file);
+			container->ofs = parent_page->file.file_ofs;
+			container->read_bytes = parent_page->file.read_bytes;
+
+			vm_alloc_page_with_initializer(parent_page->operations->type, upage, writable, NULL, container);
+			struct page * child_page = spt_find_page(dst, upage);
+			
+			file_backed_initializer(child_page, VM_FILE, NULL);
+			pml4_set_page(thread_current()->pml4, child_page->va, parent_page->frame->kva, parent_page->writable);
+			child_page->frame = parent_page->frame;
 			}
 		}
 		return true;
