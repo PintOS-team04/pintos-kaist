@@ -144,8 +144,14 @@ static struct frame *
 vm_evict_frame (void) {
 	struct frame *victim UNUSED = vm_get_victim ();
 	/* TODO: swap out the victim and return the evicted frame. */
+	// if (victim->page == NULL)
+	// 	return victim;
+
 	swap_out(victim->page);
 	return victim;
+	// if (swap_out(victim->page))
+	// 	return victim;
+	// return NULL;
 }
 
 /* palloc() and get frame. If there is no available page, evict the page
@@ -196,6 +202,9 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED, bool user U
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
+	// printf("%x\n", addr);
+	// printf("%d\n", user);
+
 	if (addr == NULL || is_kernel_vaddr(addr))
 		return false;
 
