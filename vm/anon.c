@@ -77,7 +77,6 @@ anon_swap_out (struct page *page) {
 	pml4_clear_page(thread_current()->pml4, page->va);
 
 	anon_page->swap_index = page_no;
-	// page->frame = NULL;
 
 	return true;
 }
@@ -85,8 +84,8 @@ anon_swap_out (struct page *page) {
 /* Destroy the anonymous page. PAGE will be freed by the caller. */
 static void
 anon_destroy (struct page *page) {
-	// if (&page->frame != NULL)
-	// 	return;
+	if (&page->frame != NULL)
+		return;
 	
 	struct anon_page *anon_page = &page->anon;
 }
