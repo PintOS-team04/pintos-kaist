@@ -392,11 +392,11 @@ process_exit (void) {
 	palloc_free_multiple(curr->fdt,FDT_PAGES);
 
 	file_close(curr->running);
+	
+	process_cleanup ();
 
 	sema_up(&curr->wait_sema);
 	sema_down(&curr->free_sema);
-
-	process_cleanup ();
 }
 
 /* Free the current process's resources. */
