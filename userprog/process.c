@@ -18,6 +18,8 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+
+#include "include/userprog/syscall.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -287,6 +289,8 @@ process_exec (void *f_name) {
 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
+	
+	process_cleanup ();
 
 	//memset(argv,NULL,sizeof(argv)); // project 2 추가 내용, argv 초기화 방법 1
 
@@ -297,18 +301,18 @@ process_exec (void *f_name) {
 		argc++;
     }
 
-	// file_name = argv[0];
+	file_name = argv[0];
 	/* We first kill the current context */
-	process_cleanup ();
-
+	// process_cleanup ();
+	lock_acquire(&filesys_lock);
 	/* And then load the binary */
 	success = load (file_name, &_if);
-
+	lock_release(&filesys_lock);
 
 	// hex_dump(_if.rsp, _if.rsp, USER_STACK - (uint64_t)_if.rsp, true);
 	/* If load failed, quit. */
 	if (!success){
-		palloc_free_page (file_name);
+		// palloc_free_page (file_name);
 		return -1;
 	}
 	
