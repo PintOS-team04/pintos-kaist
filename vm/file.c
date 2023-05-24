@@ -41,12 +41,41 @@ file_backed_initializer (struct page *page, enum vm_type type, void *kva) {
 static bool
 file_backed_swap_in (struct page *page, void *kva) {
 	struct file_page *file_page UNUSED = &page->file;
+
+	if (page == NULL) {
+		return false;
+	}
+
+	struct file *file = file_page->file;
+	off_t offset = file_page->file_ofs;
+	size_t page_read_bytes = file_page->read_bytes;
+	size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+	file_seek(file, offset);
+	file_read(file, kva, page_read_bytes);
+
+	memset(kva + page_read_bytes, 0, page_zero_bytes);
+
+	return true;
 }
 
 /* Swap out the page by writeback contents to the file. */
 static bool
 file_backed_swap_out (struct page *page) {
 	struct file_page *file_page UNUSED = &page->file;
+
+	if (page == NULL) {
+		return false;
+	}
+
+	if (pml4_is_dirty(thread_current()->pml4, page->va)) {
+		file_write_at(file_page->file, page->va, file_page->read_bytes, file_page->file_ofs);
+		pml4_set_dirty(thread_current()->pml4, page->va, 0);
+	}
+	page->frame = NULL;
+	pml4_clear_page(thread_current()->pml4, page->va);
+
+	return true;
 }
 
 /* Destory the file backed page. PAGE will be freed by the caller. */
@@ -60,6 +89,7 @@ file_backed_destroy (struct page *page) {
 			pml4_set_dirty(thread_current()->pml4, page->va, 0);
 		}
 
+		page->frame = NULL;
 		pml4_clear_page(thread_current()->pml4, page->va);
 
 }
@@ -120,13 +150,14 @@ void do_munmap (void *addr) {
 	for (int i = 0; i < page->page_cnt; i++) {
 		addr += PGSIZE;
 		if (page) {
-			spt_remove_page(&thread_current()->spt, page);
+			//spt_remove_page(&thread_current()->spt, page);
+			destroy(page);
 
 		}
 		page = spt_find_page(&thread_current()->spt, addr);
 		if (page== NULL){
 			return;
-		} ////////
+		} 
 	}
 
 }
