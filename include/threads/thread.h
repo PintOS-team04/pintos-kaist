@@ -121,6 +121,8 @@ struct thread {
 	int next_fd;
 	struct file **fdt;
 	struct file *running;
+	void *user_rsp; /*project 3 stack_growth */
+
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -129,6 +131,8 @@ struct thread {
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
 	struct supplemental_page_table spt;
+	// void *stack_bottom; /* project 3 anon page */
+	
 #endif
 
 	/* Owned by thread.c. */

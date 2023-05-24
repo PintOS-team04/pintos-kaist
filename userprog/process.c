@@ -18,6 +18,8 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+
+#include "include/userprog/syscall.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -46,10 +48,17 @@ struct thread *get_child_process(int pid){
 
 struct file *search_file_to_fdt (int fd){
 	struct thread *curr = thread_current();
-	if (fd < 0 || fd >= FDCOUNT_LIMIT) {
+	struct file **fdt = curr->fdt;
+	/* 파일 디스크립터에 해당하는 파일 객체를 리턴 */
+	/* 없을 시 NULL 리턴 */
+	if (fd < 2 || fd >= FDCOUNT_LIMIT)
 		return NULL;
-	}
-	return curr->fdt[fd];
+	return fdt[fd];
+	// struct thread *curr = thread_current();
+	// if (fd < 0 || fd >= FDCOUNT_LIMIT) {
+	// 	return NULL;
+	// }
+	// return curr->fdt[fd];
 }
 
 int add_file_to_fdt (struct file *file){
@@ -110,7 +119,7 @@ initd (void *f_name) {
 	supplemental_page_table_init (&thread_current ()->spt);
 #endif
 
-	process_init ();
+	// process_init (); //////////////////////////////////////////
 
 	if (process_exec (f_name) < 0)
 		PANIC("Fail to launch initd\n");
@@ -136,6 +145,7 @@ process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	struct thread *child_t = get_child_process(pid);
 	sema_down(&child_t->fork_sema);
 	if (child_t->exit_status == -1) {
+		sema_up(&child_t->free_sema); //////
 		return TID_ERROR;
 	}
 	return pid;
@@ -279,6 +289,8 @@ process_exec (void *f_name) {
 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
+	
+	process_cleanup ();
 
 	//memset(argv,NULL,sizeof(argv)); // project 2 추가 내용, argv 초기화 방법 1
 
@@ -289,18 +301,18 @@ process_exec (void *f_name) {
 		argc++;
     }
 
-	// file_name = argv[0];
+	file_name = argv[0];
 	/* We first kill the current context */
-	process_cleanup ();
-
+	// process_cleanup ();
+	lock_acquire(&filesys_lock);
 	/* And then load the binary */
 	success = load (file_name, &_if);
-
+	lock_release(&filesys_lock);
 
 	// hex_dump(_if.rsp, _if.rsp, USER_STACK - (uint64_t)_if.rsp, true);
 	/* If load failed, quit. */
 	if (!success){
-		palloc_free_page (file_name);
+		// palloc_free_page (file_name);
 		return -1;
 	}
 	
@@ -394,10 +406,11 @@ process_exit (void) {
 
 	file_close(curr->running);
 
+	process_cleanup ();
 	sema_up(&curr->wait_sema);
 	sema_down(&curr->free_sema);
 
-	process_cleanup ();
+	// process_cleanup ();
 }
 
 /* Free the current process's resources. */
@@ -754,12 +767,46 @@ install_page (void *upage, void *kpage, bool writable) {
 /* From here, codes will be used after project 3.
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
+// project 3 - anon page
+// aux로 넘겨줄 정보 값을 저장하는 구조체
+// struct lazy_load_container {
+//     struct file *file;
+//     off_t ofs;
+//     uint32_t read_bytes;
+//     uint32_t zero_bytes;
+// };
 
-static bool
+// 함수 다시 보기
+bool
 lazy_load_segment (struct page *page, void *aux) {
 	/* TODO: Load the segment from the file */
 	/* TODO: This called when the first page fault occurs on address VA. */
 	/* TODO: VA is available when calling this function. */
+	// 콘텐츠를 메모리에 넣어줌
+	struct lazy_load_container *container = (struct lazy_load_container *) aux;
+
+	
+	uint32_t read_bytes = container->read_bytes;
+	uint32_t zero_bytes = container->zero_bytes;
+	off_t ofs = container->ofs;
+	struct file *file = container->file;
+
+	file_seek (file, ofs);
+
+	/* Get a page of memory. */
+	//uint8_t *kpage = palloc_get_page (PAL_USER);
+	uint8_t *kpage = page->frame->kva;
+	if (kpage == NULL)
+		return false;
+
+	/* Load this page. */
+	if (file_read (file, kpage, read_bytes) != (int) read_bytes) {
+		palloc_free_page (kpage);
+		return false;
+	}
+	memset (kpage + read_bytes, 0, zero_bytes);
+
+	return true;
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
@@ -791,7 +838,17 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
+		// 로딩 중인 파일의 정보나 로딩할 페이지의 위치(세그먼트)를
+		// load_segment의 aux값을 저장해뒀다가 lazy_load_segment에 인자로 넘겨줘야함
+		/* Project 3 anon page */
+		struct lazy_load_container *aux = NULL;
+		aux = (struct lazy_load_container*)malloc(sizeof(struct lazy_load_container));
+
+		aux->file = file;
+		aux->ofs = ofs;
+		aux->read_bytes = page_read_bytes;
+		aux->zero_bytes = page_zero_bytes;
+
 		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
 					writable, lazy_load_segment, aux))
 			return false;
@@ -800,6 +857,8 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
 		upage += PGSIZE;
+		// 추가
+		ofs += page_read_bytes;
 	}
 	return true;
 }
@@ -814,7 +873,17 @@ setup_stack (struct intr_frame *if_) {
 	 * TODO: If success, set the rsp accordingly.
 	 * TODO: You should mark the page is stack. */
 	/* TODO: Your code goes here */
-
+	// vm_alloc_page() 호출해서 하나의 uninit 페이지 생성
+	// 해당 페이지는 바로 물리 프레임을 할당 시켜서 anon 타입 페이지 설정
+	// 호출 성공 시 rsp 값을 USER_STACK으로 변경
+	// 현재 스레드의 stack_bottom을 stack_bottom으로 받음
+	if(vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, 1)){
+        success = vm_claim_page(stack_bottom);
+        if(success){
+            if_->rsp = USER_STACK;
+        }
+    }
 	return success;
+	
 }
 #endif /* VM */

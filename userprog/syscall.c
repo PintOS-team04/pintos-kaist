@@ -34,6 +34,9 @@ int write (int fd, const void *buffer, unsigned size) ;
 void seek (int fd, unsigned position);
 unsigned tell (int fd);
 void close (int fd);
+/* project 3 */
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset);
+void munmap (void *addr);
 
 /* System call.
  *
@@ -47,7 +50,7 @@ void close (int fd);
 #define MSR_STAR 0xc0000081         /* Segment selector msr */
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
-struct lock filesys_lock;
+// struct lock filesys_lock;
 void
 syscall_init (void) {
 	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48  |
@@ -59,23 +62,23 @@ syscall_init (void) {
 	 * mode stack. Therefore, we masked the FLAG_FL. */
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
-	lock_init(&filesys_lock);
+	// lock_init(&filesys_lock);
 }
 
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
 	// TODO: Your implementation goes here.
-
+	thread_current()->user_rsp = f->rsp; /* project 3 stack_growth */
 	uint64_t sys_number = f->R.rax;
 	
     switch (sys_number)
     {
 		case SYS_HALT:
-				halt(); //
+				halt();
 				break;
 		case SYS_EXIT:
-				exit(f->R.rdi); //
+				exit(f->R.rdi);
 				break;
 		case SYS_FORK:
 				f->R.rax = fork(f->R.rdi, f); //syscall만, process해야함
@@ -87,16 +90,16 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				f->R.rax = wait(f->R.rdi); //syscall만, process해야함
 				break;
 		case SYS_CREATE:
-				f->R.rax = create(f->R.rdi, f->R.rsi); //
+				f->R.rax = create(f->R.rdi, f->R.rsi);
 				break;
 		case SYS_REMOVE:
-				f->R.rax = remove(f->R.rdi); //
+				f->R.rax = remove(f->R.rdi);
 				break;
 		case SYS_OPEN:
-				f->R.rax = open(f->R.rdi); //
+				f->R.rax = open(f->R.rdi);
 				break;
 		case SYS_FILESIZE:
-				f->R.rax = filesize(f->R.rdi); //
+				f->R.rax = filesize(f->R.rdi);
 				break;
 		case SYS_READ:
 				f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
@@ -105,16 +108,22 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
 				break;
 		case SYS_SEEK:
-				seek(f->R.rdi, f->R.rsi); //
+				seek(f->R.rdi, f->R.rsi);
 				break;
 		case SYS_TELL:
-				f->R.rax = tell(f->R.rdi); //
+				f->R.rax = tell(f->R.rdi);
 				break;
 		case SYS_CLOSE:
-				close(f->R.rdi); //
+				close(f->R.rdi);
 				break; 
+		case SYS_MMAP:
+				f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+				break;
+		case SYS_MUNMAP:
+				munmap(f->R.rdi);
+				break;
 		default:
-			exit(-1); ///////
+			exit(-1);
 			break;
 		}
 }
@@ -143,9 +152,9 @@ int exec (const char *cmd_line) {
 
 	int size = strlen(cmd_line) + 1; // null 값 포함한 파일 사이즈
 	char *fn_copy = palloc_get_page(PAL_ZERO);
-	if ((fn_copy) == NULL) {
-		exit(-1);
-	}
+	// if ((fn_copy) == NULL) {
+	// 	exit(-1);
+	// }
 	strlcpy(fn_copy, cmd_line, size);
 
 	if (process_exec(fn_copy) == -1) {
@@ -153,7 +162,7 @@ int exec (const char *cmd_line) {
 	}
 
 	NOT_REACHED();
-	return 0;
+
 }
 
 
@@ -200,25 +209,64 @@ int filesize (int fd) {
 	return file_length(file);
 }
 
-
-int read (int fd, void *buffer, unsigned size) {
-	/* 파일에 동시 접근이 일어날 수 있으므로 Lock 사용 */
-/* 파일 디스크립터를 이용하여 파일 객체 검색 */
-/* 파일 디스크립터가 0일 경우 키보드에 입력을 버퍼에 저장 후
-버퍼의 저장한 크기를 리턴 (input_getc() 이용) */
-/* 파일 디스크립터가 0이 아닐 경우 파일의 데이터를 크기만큼 저
-장 후 읽은 바이트 수를 리턴  */ 
+int read(int fd, void *buffer, unsigned size)
+{
+	check_address(buffer);
+	struct page *page = spt_find_page(&thread_current()->spt, pg_round_down(buffer));
+	if (page != NULL && page->writable == 0)
+		exit(-1);
+	off_t read_byte = 0;
+	uint8_t *read_buffer = (char *)buffer;
 	lock_acquire(&filesys_lock);
-	if(fd == 0){
-		input_getc();
-		lock_release(&filesys_lock);
-		return size;
+	if (fd == 0)
+	{
+		char key;
+		for (read_byte = 0; read_byte < size; read_byte++)
+		{
+			key = input_getc();	  // 키보드에 한 문자 입력받기
+			*read_buffer++ = key; // read_buffer에 받은 문자 저장
+			if (key == '\n')
+			{
+				break;
+			}
+		}
 	}
-  	struct file *fileobj= search_file_to_fdt(fd);
-	size = file_read(fileobj,buffer,size);
-	lock_release(&filesys_lock);	
-	return size;
+	else if (fd == 1)
+	{
+		lock_release(&filesys_lock);
+		return -1;
+	}
+	else
+	{
+		struct file *read_file = search_file_to_fdt(fd);
+		if (read_file == NULL)
+		{
+			lock_release(&filesys_lock);
+			return -1;
+		}
+		read_byte = file_read(read_file, buffer, size);
+	}
+	lock_release(&filesys_lock);
+	return read_byte;
 }
+// int read (int fd, void *buffer, unsigned size) {
+// 	/* 파일에 동시 접근이 일어날 수 있으므로 Lock 사용 */
+// /* 파일 디스크립터를 이용하여 파일 객체 검색 */
+// /* 파일 디스크립터가 0일 경우 키보드에 입력을 버퍼에 저장 후
+// 버퍼의 저장한 크기를 리턴 (input_getc() 이용) */
+// /* 파일 디스크립터가 0이 아닐 경우 파일의 데이터를 크기만큼 저
+// 장 후 읽은 바이트 수를 리턴  */ 
+// 	lock_acquire(&filesys_lock);
+// 	if(fd == 0){
+// 		input_getc();
+// 		lock_release(&filesys_lock);
+// 		return size;
+// 	}
+//   	struct file *fileobj= search_file_to_fdt(fd);
+// 	size = file_read(fileobj,buffer,size);
+// 	lock_release(&filesys_lock);	
+// 	return size;
+// }
 
 int write (int fd, const void *buffer, unsigned size) {
 	/* 파일에 동시 접근이 일어날 수 있으므로 Lock 사용 */
@@ -278,7 +326,38 @@ void close (int fd) {
 
 void check_address(void *addr){
 	struct thread *curr = thread_current();
-	if(addr== NULL || !is_user_vaddr(addr)|| pml4_get_page(curr->pml4, addr) == NULL){
+	// project 3 수정
+	// if(addr== NULL || !is_user_vaddr(addr)|| pml4_get_page(curr->pml4, addr) == NULL){
+	if(addr== NULL || !is_user_vaddr(addr)){
 		exit(-1);
 	} 
+}
+
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
+	if (offset % PGSIZE != 0) {
+		return NULL;
+	}
+	// mmap 실패하는 경우 : addr null || aligned || 
+	if (addr == NULL || pg_round_down(addr) != addr ||length == 0 || KERN_BASE <= length || is_kernel_vaddr(addr)) {
+		return NULL;
+	}
+
+	if (spt_find_page(&thread_current()->spt, addr)) {
+		return NULL;
+	}
+
+	if (fd == 0 || fd == 1) {
+		exit(-1);
+	}
+
+	struct file * find_file = search_file_to_fdt(fd);
+	if (find_file == NULL) {
+		return NULL;
+	}
+
+	return do_mmap(addr, length, writable, find_file, offset);
+}
+
+void munmap (void *addr) {
+	do_munmap(addr);
 }
