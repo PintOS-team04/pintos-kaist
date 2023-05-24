@@ -8,12 +8,14 @@
 #include "threads/thread.h"
 #include "../include/userprog/process.h"
 #include "threads/mmu.h"
+#include <string.h>
 
 unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
 bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
 bool page_insert(struct hash *h, struct page *p);
 void hash_elem_destroy(struct hash_elem *e, void *aux);
 struct list frame_table;
+struct lock frame_lock;
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -25,6 +27,8 @@ vm_init (void) {
 	pagecache_init ();
 #endif
 	register_inspect_intr ();
+	list_init(&frame_table);
+	lock_init(&frame_lock);
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
 }
@@ -151,7 +155,19 @@ static struct frame *
 vm_get_victim (void) {
 	struct frame *victim = NULL;
 	 /* TODO: The policy for eviction is up to you. */
-
+	struct thread *curr = thread_current();
+	lock_acquire(&frame_lock);
+	for (struct list_elem *e = list_begin(&frame_table); e != list_end(&frame_table); e = list_next(e)) {
+		victim = list_entry(e, struct frame, frame_elem);
+		// bit가 1인 경우
+		if (pml4_is_accessed(curr->pml4, victim->page->va)) {
+			pml4_set_accessed(curr->pml4, victim->page->va, 0);
+		} else {
+			lock_release(&frame_lock);
+			return victim;
+		}
+	}
+	lock_release(&frame_lock);
 	return victim;
 }
 
@@ -161,8 +177,8 @@ static struct frame *
 vm_evict_frame (void) {
 	struct frame *victim UNUSED = vm_get_victim ();
 	/* TODO: swap out the victim and return the evicted frame. */
-
-	return NULL;
+	swap_out(victim->page);
+	return victim;
 }
 
 /* palloc() and get frame. If there is no available page, evict the page
@@ -177,8 +193,14 @@ vm_get_frame (void) {
 	frame->kva = palloc_get_page(PAL_USER);
 
 	if (frame->kva == NULL) {
-		PANIC("TODO");
+		// PANIC("TODO");
+		frame = vm_evict_frame();
+		frame->page = NULL;
+		return frame;
 	}
+	lock_acquire(&frame_lock);
+	list_push_back(&frame_table, &frame->frame_elem);
+	lock_release(&frame_lock);
 	frame->page = NULL;
 
 	ASSERT (frame != NULL);
