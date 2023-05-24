@@ -19,7 +19,7 @@
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
-void check_address(void *addr);
+struct page * check_address(void *addr);
 void half(void);
 void exit(int status);
 tid_t fork (const char *thread_name,struct intr_frame *f);
@@ -34,6 +34,8 @@ int write (int fd, const void *buffer, unsigned size) ;
 void seek (int fd, unsigned position);
 unsigned tell (int fd);
 void close (int fd);
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset);
+void munmap (void *addr);
 
 /* System call.
  *
@@ -66,16 +68,16 @@ syscall_init (void) {
 void
 syscall_handler (struct intr_frame *f UNUSED) {
 	// TODO: Your implementation goes here.
-
+	thread_current()->user_rsp = f->rsp; /* project 3 stack_growth */
 	uint64_t sys_number = f->R.rax;
 	
     switch (sys_number)
     {
 		case SYS_HALT:
-				halt(); //
+				halt();
 				break;
 		case SYS_EXIT:
-				exit(f->R.rdi); //
+				exit(f->R.rdi);
 				break;
 		case SYS_FORK:
 				f->R.rax = fork(f->R.rdi, f); //syscall만, process해야함
@@ -87,34 +89,42 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				f->R.rax = wait(f->R.rdi); //syscall만, process해야함
 				break;
 		case SYS_CREATE:
-				f->R.rax = create(f->R.rdi, f->R.rsi); //
+				f->R.rax = create(f->R.rdi, f->R.rsi);
 				break;
 		case SYS_REMOVE:
-				f->R.rax = remove(f->R.rdi); //
+				f->R.rax = remove(f->R.rdi);
 				break;
 		case SYS_OPEN:
-				f->R.rax = open(f->R.rdi); //
+				f->R.rax = open(f->R.rdi);
 				break;
 		case SYS_FILESIZE:
-				f->R.rax = filesize(f->R.rdi); //
+				f->R.rax = filesize(f->R.rdi);
 				break;
 		case SYS_READ:
+				//check_valid_buffer(f->R.rsi, f->R.rdx, f->rsp, 1);
 				f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
 				break;
 		case SYS_WRITE:
+				//check_valid_buffer(f->R.rsi, f->R.rdx, f->rsp, 0);
 				f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
 				break;
 		case SYS_SEEK:
-				seek(f->R.rdi, f->R.rsi); //
+				seek(f->R.rdi, f->R.rsi);
 				break;
 		case SYS_TELL:
-				f->R.rax = tell(f->R.rdi); //
+				f->R.rax = tell(f->R.rdi);
 				break;
 		case SYS_CLOSE:
-				close(f->R.rdi); //
+				close(f->R.rdi);
 				break; 
+		case SYS_MMAP:
+				f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+				break;
+		case SYS_MUNMAP:
+				munmap(f->R.rdi);
+				break;
 		default:
-			exit(-1); ///////
+			exit(-1);
 			break;
 		}
 }
@@ -122,6 +132,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 
 void halt(void) {
     power_off();
+
 }
 
 // userprog/syscall.c
@@ -202,19 +213,28 @@ int filesize (int fd) {
 
 
 int read (int fd, void *buffer, unsigned size) {
-	/* 파일에 동시 접근이 일어날 수 있으므로 Lock 사용 */
-/* 파일 디스크립터를 이용하여 파일 객체 검색 */
-/* 파일 디스크립터가 0일 경우 키보드에 입력을 버퍼에 저장 후
-버퍼의 저장한 크기를 리턴 (input_getc() 이용) */
-/* 파일 디스크립터가 0이 아닐 경우 파일의 데이터를 크기만큼 저
-장 후 읽은 바이트 수를 리턴  */ 
+	check_address(buffer);
+
 	lock_acquire(&filesys_lock);
+	if(fd == 1){
+		lock_release(&filesys_lock);
+		return -1;
+	}
+
 	if(fd == 0){
 		input_getc();
 		lock_release(&filesys_lock);
 		return size;
 	}
   	struct file *fileobj= search_file_to_fdt(fd);
+	if(fileobj){
+		struct page *page = spt_find_page(&thread_current()->spt,buffer);
+		if(page != NULL && page->writable == 0){
+			lock_release(&filesys_lock);
+			exit(-1);
+		}
+	}
+		
 	size = file_read(fileobj,buffer,size);
 	lock_release(&filesys_lock);	
 	return size;
@@ -276,9 +296,54 @@ void close (int fd) {
 }
 
 
-void check_address(void *addr){
+struct page * check_address(void *addr){
 	struct thread *curr = thread_current();
-	if(addr== NULL || !is_user_vaddr(addr)|| pml4_get_page(curr->pml4, addr) == NULL){
+	// project 3 수정
+	// if(addr== NULL || !is_user_vaddr(addr)|| pml4_get_page(curr->pml4, addr) == NULL){
+	if(addr== NULL || !is_user_vaddr(addr)){
 		exit(-1);
-	} 
+	}
+	return spt_find_page(&thread_current()->spt, addr);
+}
+
+//project 3 add
+// void check_valid_buffer(void* buffer, unsigned size, void* rsp, bool to_write){
+// 	if (buffer <= USER_STACK && buffer >= rsp)
+// 		return;
+	
+// 	for(int i=0; i<size; i++){
+//         struct page* page = check_address(buffer + i);
+//         if(page == NULL)
+//             exit(-1);
+//         if(to_write == true && page->writable == false)
+//             exit(-1);
+//     }
+// }
+
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
+	if (offset % PGSIZE != 0) {
+		return NULL;
+	}
+	// mmap 실패하는 경우 : addr null || aligned || 
+	if (addr == NULL || pg_round_down(addr) != addr || (int)length <= 0 || is_kernel_vaddr(addr)) {
+		return NULL;
+	}
+
+	if (spt_find_page(&thread_current()->spt, addr)) {
+		return NULL;
+	}
+	if (fd == 0 || fd == 1) {
+		exit(-1);
+	}
+
+	struct file * find_file = search_file_to_fdt(fd);
+	if (find_file == NULL) {
+		return NULL;
+	}
+	return do_mmap(addr, length, writable, find_file, offset);
+}
+
+void munmap (void *addr) {
+	return do_munmap(addr);
+
 }

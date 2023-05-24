@@ -52,6 +52,7 @@ uninit_initialize (struct page *page, void *kva) {
 	void *aux = uninit->aux;
 
 	/* TODO: You may need to fix this function. */
+	// page_initializer(페이지 타입 변경)와 lazy_load_segment(실질적 콘텐츠 로드)를 실행해줌
 	return uninit->page_initializer (page, uninit->type, kva) &&
 		(init ? init (page, aux) : true);
 }

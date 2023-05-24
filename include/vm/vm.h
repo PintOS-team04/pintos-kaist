@@ -3,6 +3,12 @@
 #include <stdbool.h>
 #include "threads/palloc.h"
 
+#include <hash.h>
+#include "threads/mmu.h"
+#include "threads/vaddr.h"
+#include <list.h>
+
+
 enum vm_type {
 	/* page not initialized */
 	VM_UNINIT = 0,
@@ -27,6 +33,8 @@ enum vm_type {
 #include "vm/uninit.h"
 #include "vm/anon.h"
 #include "vm/file.h"
+
+#include "lib/kernel/hash.h"
 #ifdef EFILESYS
 #include "filesys/page_cache.h"
 #endif
@@ -44,9 +52,13 @@ struct page {
 	const struct page_operations *operations;
 	void *va;              /* Address in terms of user space */
 	struct frame *frame;   /* Back reference for frame */
+	struct list_elem frame_elem; // frame_table을 위한 list_elem 추가
 
 	/* Your implementation */
-
+	/* project 3-1 */
+	struct hash_elem hash_elem;
+	bool writable;
+	int page_cnt;
 	/* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */
 	union {
@@ -59,10 +71,14 @@ struct page {
 	};
 };
 
+struct list frame_table;
+struct lock frame_lock;
+
 /* The representation of "frame" */
 struct frame {
 	void *kva;
 	struct page *page;
+	struct list_elem elem; /* P3 추가 */
 };
 
 /* The function table for page operations.
@@ -85,6 +101,7 @@ struct page_operations {
  * We don't want to force you to obey any specific design for this struct.
  * All designs up to you for this. */
 struct supplemental_page_table {
+	struct hash spt_hash;
 };
 
 #include "threads/thread.h"
