@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "userprog/syscall.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -28,6 +29,8 @@ static void initd (void *f_name);
 static void __do_fork (void *);
 void argument_stack(char **argv , int argc ,struct intr_frame *if_);
 struct thread *get_child_process(int pid);
+
+struct lock filesys_lock;
 
 // project 2 fork 관련 함수
 struct thread *get_child_process(int pid){
@@ -46,10 +49,12 @@ struct thread *get_child_process(int pid){
 
 struct file *search_file_to_fdt (int fd){
 	struct thread *curr = thread_current();
-	if (fd < 0 || fd >= FDCOUNT_LIMIT) {
+	struct file **fdt = curr->fdt;
+	/* 파일 디스크립터에 해당하는 파일 객체를 리턴 */
+	/* 없을 시 NULL 리턴 */
+	if (fd < 2 || fd >= FDCOUNT_LIMIT)
 		return NULL;
-	}
-	return curr->fdt[fd];
+	return fdt[fd];
 }
 
 int add_file_to_fdt (struct file *file){
@@ -92,7 +97,6 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
-	/*----------추가 코드------------------------*/
 	char *save_ptr;
 	file_name =strtok_r(file_name," ",&save_ptr);
 
@@ -109,8 +113,7 @@ initd (void *f_name) {
 #ifdef VM
 	supplemental_page_table_init (&thread_current ()->spt);
 #endif
-
-	process_init ();
+	// process_init ();
 
 	if (process_exec (f_name) < 0)
 		PANIC("Fail to launch initd\n");
@@ -165,8 +168,7 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
-	// newpage = palloc_get_page (PAL_USER); /////
-	newpage = palloc_get_page(PAL_USER | PAL_ZERO); ///////////////////
+	newpage = palloc_get_page(PAL_USER | PAL_ZERO);
 	if(newpage == NULL){
 		return false;
 	}
@@ -280,8 +282,6 @@ process_exec (void *f_name) {
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
-	//memset(argv,NULL,sizeof(argv)); // project 2 추가 내용, argv 초기화 방법 1
-
 	for(token = strtok_r(file_name," ", &save_ptr); token != NULL;){
         //printf ("'%s'\n", token);
 		argv[argc] = token;
@@ -289,15 +289,14 @@ process_exec (void *f_name) {
 		argc++;
     }
 
-	// file_name = argv[0];
 	/* We first kill the current context */
 	process_cleanup ();
 
 	/* And then load the binary */
+	lock_acquire(&filesys_lock);
 	success = load (file_name, &_if);
+	lock_release(&filesys_lock);
 
-
-	// hex_dump(_if.rsp, _if.rsp, USER_STACK - (uint64_t)_if.rsp, true);
 	/* If load failed, quit. */
 	if (!success){
 		palloc_free_page (file_name);
@@ -393,11 +392,11 @@ process_exit (void) {
 	palloc_free_multiple(curr->fdt,FDT_PAGES);
 
 	file_close(curr->running);
+	
+	process_cleanup ();
 
 	sema_up(&curr->wait_sema);
 	sema_down(&curr->free_sema);
-
-	process_cleanup ();
 }
 
 /* Free the current process's resources. */
@@ -755,11 +754,31 @@ install_page (void *upage, void *kpage, bool writable) {
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
 
-static bool
+bool
 lazy_load_segment (struct page *page, void *aux) {
 	/* TODO: Load the segment from the file */
 	/* TODO: This called when the first page fault occurs on address VA. */
 	/* TODO: VA is available when calling this function. */
+	struct segment *load_src = (struct segment *)aux;
+	off_t offset = load_src->offset;
+	uint32_t page_read_bytes = load_src->page_read_bytes;
+	uint32_t page_zero_bytes = load_src->page_zero_bytes;
+	struct file *file = load_src->file;
+
+	file_seek(file, offset);
+	/* Get a page of memory. */
+    uint8_t *kpage = page->frame->kva;
+    if (kpage == NULL)
+        return false;
+
+	if (file_read(file, kpage, page_read_bytes) != (int)page_read_bytes) {
+		palloc_free_page(kpage);
+		return false;
+	}
+
+	memset(kpage + page_read_bytes, 0, page_zero_bytes);
+
+	return true;
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
@@ -777,8 +796,7 @@ lazy_load_segment (struct page *page, void *aux) {
  * Return true if successful, false if a memory allocation error
  * or disk read error occurs. */
 static bool
-load_segment (struct file *file, off_t ofs, uint8_t *upage,
-		uint32_t read_bytes, uint32_t zero_bytes, bool writable) {
+load_segment (struct file *file, off_t ofs, uint8_t *upage, uint32_t read_bytes, uint32_t zero_bytes, bool writable) {
 	ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
 	ASSERT (pg_ofs (upage) == 0);
 	ASSERT (ofs % PGSIZE == 0);
@@ -791,14 +809,20 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
-		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
-					writable, lazy_load_segment, aux))
-			return false;
+		struct segment *seg = (struct segment *)calloc(1, sizeof(struct segment));
+		seg->file = file;
+		seg->offset = ofs;
+		seg->page_read_bytes = page_read_bytes;
+		seg->page_zero_bytes = page_zero_bytes;
 
+		if (!vm_alloc_page_with_initializer (VM_ANON, upage, writable, lazy_load_segment, seg)) {
+			// free(seg);
+			return false;
+		}
 		/* Advance. */
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
+		ofs += page_read_bytes;
 		upage += PGSIZE;
 	}
 	return true;
@@ -808,13 +832,18 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (struct intr_frame *if_) {
 	bool success = false;
-	void *stack_bottom = (void *) (((uint8_t *) USER_STACK) - PGSIZE);
+	void *stack_bottom = (void *)(((uint8_t *) USER_STACK) - PGSIZE);
 
 	/* TODO: Map the stack on stack_bottom and claim the page immediately.
 	 * TODO: If success, set the rsp accordingly.
 	 * TODO: You should mark the page is stack. */
 	/* TODO: Your code goes here */
-
+	if (vm_alloc_page_with_initializer(VM_ANON, stack_bottom, 1, NULL, NULL)) {
+		success = vm_claim_page(stack_bottom);
+		if (success) {
+			if_->rsp = USER_STACK;
+		}
+	}
 	return success;
 }
 #endif /* VM */
