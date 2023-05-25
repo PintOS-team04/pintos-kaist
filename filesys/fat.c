@@ -30,6 +30,7 @@ static struct fat_fs *fat_fs;
 
 void fat_boot_create (void);
 void fat_fs_init (void);
+cluster_t sector_to_cluster(disk_sector_t sector);
 
 void
 fat_init (void) {
@@ -150,44 +151,86 @@ fat_boot_create (void) {
 	};
 }
 
+/* FAT 파일 시스템 초기화 */
 void
 fat_fs_init (void) {
 	/* TODO: Your code goes here. */
+	fat_fs->fat_length = fat_fs->fat_length = fat_fs->bs.total_sectors;		// fat_length : 파일 시스템의 클러스터 수
+	fat_fs->data_start = fat_fs->bs.fat_start + fat_fs->bs.fat_sectors;		// data_start : 파일 저장을 시작할 수 있는 섹터
 }
 
 /*----------------------------------------------------------------------------*/
 /* FAT handling                                                               */
 /*----------------------------------------------------------------------------*/
 
+/* clst(클러스터 인덱싱 번호)로 특정된 클러스터의 뒤에 클러스터 추가 -> 체인 확장 */
 /* Add a cluster to the chain.
  * If CLST is 0, start a new chain.
  * Returns 0 if fails to allocate a new cluster. */
 cluster_t
 fat_create_chain (cluster_t clst) {
 	/* TODO: Your code goes here. */
+	for (cluster_t i = 1; i <= (fat_fs->bs.fat_sectors * 128); i++) {
+		cluster_t cluster = fat_get(i);
+		if (cluster == 0) {
+			fat_put(i, EOChain);
+			if (cluster != 0)
+				fat_put(clst, i);
+			return i;
+		}
+	}
+	return 0;
 }
 
+/* clst에서 시작 -> 체인에서 클러스터를 제거(0으로 값 변경) */
+/* pclst는 체인에서 clst의 바로 뒤에 있는 클러스터 / clst가 체인의 첫 요소이면 pclst는 0 */
 /* Remove the chain of clusters starting from CLST.
  * If PCLST is 0, assume CLST as the start of the chain. */
 void
 fat_remove_chain (cluster_t clst, cluster_t pclst) {
 	/* TODO: Your code goes here. */
+	cluster_t i = clst;
+	cluster_t prev_i;
+
+	while (fat_get(i) != EOChain) {
+		prev_i = i;
+		i = fat_get(i);
+		fat_put(prev_i, 0);
+	}
+	fat_put(i, 0);
+
+	if (pclst != 0)
+		fat_put(pclst, EOChain);	// pclst의 값 -> -1
 }
 
+/* 클러스터 번호 clst가 가리키는 FAT 엔트리를 val로 업데이트 */
 /* Update a value in the FAT table. */
 void
 fat_put (cluster_t clst, cluster_t val) {
 	/* TODO: Your code goes here. */
+	unsigned int *fat = fat_fs->fat;
+	fat[clst - 1] = val;
 }
 
+/* 주어진 클러스터 clst가 가리키는 클러스터 번호를 반환 */
 /* Fetch a value in the FAT table. */
 cluster_t
 fat_get (cluster_t clst) {
 	/* TODO: Your code goes here. */
+	unsigned int *fat = fat_fs->fat;
+	return fat[clst - 1];
 }
 
+/* 클러스터 번호 clst를 해당하는 섹터 번호로 변환하여 return */
 /* Covert a cluster # to a sector number. */
 disk_sector_t
 cluster_to_sector (cluster_t clst) {
 	/* TODO: Your code goes here. */
+	return fat_fs->bs.fat_sectors *clst;
+}
+
+/* 섹터 번호를 클러스터 번호로 변환하여 return */
+cluster_t
+sector_to_cluster(disk_sector_t sector) {
+	return sector - fat_fs->bs.fat_sectors;
 }
